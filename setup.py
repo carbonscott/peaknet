@@ -11,7 +11,7 @@ setuptools.setup(
     description="A neural network model finding Bragg peaks in SFX experiments.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/carbonscott/peaknet",
+    url="https://github.com/carbonscott/min_pf",
     keywords = ['SFX', 'X-ray', 'Neural network model'],
     packages=setuptools.find_packages(),
     classifiers=[

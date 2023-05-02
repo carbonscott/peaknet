@@ -13,8 +13,8 @@ import logging
 from scipy            import ndimage
 from torch.utils.data import Dataset
 
-from peaknet.utils                  import set_seed, split_dataset
-from peaknet.datasets.stream_parser import StreamParser, GeomInterpreter
+from ..utils                 import set_seed, split_dataset
+from .datasets.stream_parser import StreamParser, GeomInterpreter
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +269,7 @@ class SFXPanelDataset(Dataset):
         Extract metadata and labeled peak from chunks with MPI.
         '''
         # Import chunking method...
-        from peaknet.utils import split_dict_into_chunk
+        from ..utils import split_dict_into_chunk
 
         # Get the MPI metadata...
         mpi_comm     = self.mpi_comm
@@ -423,7 +423,7 @@ class SFXPanelDataset(Dataset):
             using MPI.
         '''
         # Import chunking method...
-        from peaknet.utils import split_list_into_chunk
+        from ..utils import split_list_into_chunk
 
         # Get the MPI metadata...
         mpi_comm     = self.mpi_comm
