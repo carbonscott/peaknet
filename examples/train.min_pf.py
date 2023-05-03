@@ -146,8 +146,8 @@ model = AttentionUNet( base_channels        = base_channels,
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Move model to gpu(s)...
-# Wrapping DataParallel seems to be lame when one gpu is available, but why not
-model = nn.DataParallel(model)
+if torch.cuda.device_count() > 1:
+    model = nn.DataParallel(model)
 model.to(device)
 
 
@@ -159,7 +159,7 @@ param_iter = model.module.parameters() if hasattr(model, "module") else model.pa
 optimizer = optim.AdamW(param_iter,
                         lr = lr,
                         weight_decay = weight_decay)
-scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
+scheduler = StepLR(optimizer, step_size=90, gamma=5e-1)
 
 
 # [[[ TRAIN LOOP ]]]
@@ -170,6 +170,7 @@ epoch_min = 0
 loss_min  = float('inf')
 if path_chkpt_prev is not None:
     epoch_min, loss_min = load_checkpoint(model, optimizer, scheduler, path_chkpt_prev)
+    ## epoch_min, loss_min = load_checkpoint(model, None, None, path_chkpt_prev)
     epoch_min += 1    # Next epoch
     logger.info(f"PREV - epoch_min = {epoch_min}, loss_min = {loss_min}")
 
