@@ -28,8 +28,8 @@ torch.autograd.set_detect_anomaly(True)
 logger = logging.getLogger(__name__)
 
 # [[[ USER INPUT ]]]
-timestamp_prev = None
-epoch          = None
+timestamp_prev = "2023_0502_0054_30"
+epoch          = 88
 
 drc_chkpt = "chkpts"
 fl_chkpt_prev   = None if timestamp_prev is None else f"{timestamp_prev}.epoch_{epoch}.chkpt"
@@ -55,8 +55,8 @@ focal_gamma   = 2 * 10**(0)
 lr           = 10**(-3.0)
 weight_decay = 1e-2
 
-size_batch  = 8 * 3
-num_workers = 8
+size_batch  = 3 * 1
+num_workers = 3
 seed        = 0
 
 # Clarify the purpose of this experiment...
@@ -146,8 +146,8 @@ model = AttentionUNet( base_channels        = base_channels,
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Move model to gpu(s)...
-if torch.cuda.device_count() > 1:
-    model = nn.DataParallel(model)
+# Wrapping DataParallel seems to be lame when one gpu is available, but why not
+model = nn.DataParallel(model)
 model.to(device)
 
 
