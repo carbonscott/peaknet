@@ -11,12 +11,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from min_pf.datasets.SFX import SFXMulticlassDataset
 from min_pf.att_unet     import AttentionUNet
 from min_pf.criterion    import CategoricalFocalLoss
-from min_pf.utils        import init_logger, MetaLog, split_dataset, save_checkpoint, load_checkpoint, set_seed
+from min_pf.utils        import init_logger, MetaLog, split_dataset, save_checkpoint, load_checkpoint, set_seed, init_weights
 
 from min_pf.trans import RandomShift,  \
                          RandomRotate, \
@@ -28,8 +28,8 @@ torch.autograd.set_detect_anomaly(True)
 logger = logging.getLogger(__name__)
 
 # [[[ USER INPUT ]]]
-timestamp_prev = "2023_0502_0054_30"
-epoch          = 88
+timestamp_prev = None # "2023_0503_1748_12"
+epoch          = None # 17
 
 drc_chkpt = "chkpts"
 fl_chkpt_prev   = None if timestamp_prev is None else f"{timestamp_prev}.epoch_{epoch}.chkpt"
@@ -52,11 +52,11 @@ base_channels = 8
 focal_alpha   = 1.2 * 10**(0)
 focal_gamma   = 2 * 10**(0)
 
-lr           = 10**(-3.0)
-weight_decay = 1e-2
+lr           = 10**(-4.0)
+weight_decay = 1e-4
 
-size_batch  = 3 * 1
-num_workers = 3
+size_batch  = 8 * 1
+num_workers = 4
 seed        = 0
 
 # Clarify the purpose of this experiment...
@@ -71,10 +71,13 @@ comments = f"""
             Dataset size           : {size_sample}
             Batch  size            : {size_batch}
             lr                     : {lr}
+            weight_decay           : {weight_decay}
             base_channels          : {base_channels}
             focal_alpha            : {focal_alpha}
             focal_gamma            : {focal_gamma}
             uses_skip_connection   : {uses_skip_connection}
+            uses_mixed_precision   : {uses_mixed_precision}
+            num_workers            : {num_workers}
             continued training???  : from {fl_chkpt_prev}
 
             """
@@ -142,6 +145,9 @@ model = AttentionUNet( base_channels        = base_channels,
                        uses_skip_connection = uses_skip_connection,
                        att_gate_channels    = None, )
 
+# Initialize weights...
+model.apply(init_weights)
+
 # Set device...
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -159,7 +165,12 @@ param_iter = model.module.parameters() if hasattr(model, "module") else model.pa
 optimizer = optim.AdamW(param_iter,
                         lr = lr,
                         weight_decay = weight_decay)
-scheduler = StepLR(optimizer, step_size=90, gamma=5e-1)
+scheduler = ReduceLROnPlateau(optimizer, mode           = 'min',
+                                         factor         = 2e-1,
+                                         patience       = 10,
+                                         threshold      = 1e-4,
+                                         threshold_mode ='rel',
+                                         verbose        = True)
 
 
 # [[[ TRAIN LOOP ]]]
@@ -281,6 +292,13 @@ for epoch in tqdm.tqdm(range(max_epochs)):
 
     validate_loss_mean = np.mean(validate_loss_list)
     logger.info(f"MSG (device:{device}) - epoch {epoch}, mean val   loss = {validate_loss_mean:.8f}")
+
+    # Report the learning rate used in the last optimization...
+    lr_used = optimizer.param_groups[0]['lr']
+    logger.info(f"MSG (device:{device}) - epoch {epoch}, lr used = {lr_used}")
+
+    # Update learning rate in the scheduler...
+    scheduler.step(validate_loss_mean)
 
 
     # ___/ SAVE CHECKPOINT??? \___

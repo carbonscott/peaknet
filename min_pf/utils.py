@@ -383,3 +383,14 @@ def remove_module_from_state_dict(state_dict):
         new_key = key.replace("module.", "")  # Remove the "module." prefix
         new_state_dict[new_key] = value
     return new_state_dict
+
+
+
+
+def init_weights(module):
+    # Initialize conv2d with Kaiming method...
+    if isinstance(module, nn.Conv2d):
+        nn.init.kaiming_normal_(module.weight.data, nonlinearity = 'relu')
+
+        # Set bias zero since batch norm is used...
+        module.bias.data.zero_()
