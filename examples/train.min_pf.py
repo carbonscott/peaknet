@@ -28,8 +28,8 @@ torch.autograd.set_detect_anomaly(True)
 logger = logging.getLogger(__name__)
 
 # [[[ USER INPUT ]]]
-timestamp_prev = None # "2023_0503_1748_12"
-epoch          = None # 17
+timestamp_prev = 2023_0505_1249_26
+epoch          = 21
 
 drc_chkpt = "chkpts"
 fl_chkpt_prev   = None if timestamp_prev is None else f"{timestamp_prev}.epoch_{epoch}.chkpt"
@@ -52,11 +52,12 @@ base_channels = 8
 focal_alpha   = 1.2 * 10**(0)
 focal_gamma   = 2 * 10**(0)
 
-lr           = 10**(-4.0)
+lr           = 10**(-3.0)
 weight_decay = 1e-4
 
-size_batch  = 8 * 1
-num_workers = 4
+num_gpu     = 2
+size_batch  = 10 * num_gpu
+num_workers = 4  * num_gpu    # mutiple of size_sample // size_batch
 seed        = 0
 
 # Clarify the purpose of this experiment...
@@ -70,6 +71,7 @@ comments = f"""
             Fraction    (train)    : {frac_train}
             Dataset size           : {size_sample}
             Batch  size            : {size_batch}
+            Number of GPUs         : {num_gpu}
             lr                     : {lr}
             weight_decay           : {weight_decay}
             base_channels          : {base_channels}
@@ -134,7 +136,7 @@ dataloader_validate = torch.utils.data.DataLoader( dataset_validate,
                                                    shuffle     = False,
                                                    pin_memory  = True,
                                                    batch_size  = size_batch,
-                                                   num_workers = num_workers, )
+                                                   num_workers = num_workers//2, )
 
 
 # [[[ MODEL ]]]
