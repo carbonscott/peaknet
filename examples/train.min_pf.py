@@ -28,7 +28,7 @@ torch.autograd.set_detect_anomaly(True)
 logger = logging.getLogger(__name__)
 
 # [[[ USER INPUT ]]]
-timestamp_prev = 2023_0505_1249_26
+timestamp_prev = "2023_0505_1249_26"
 epoch          = 21
 
 drc_chkpt = "chkpts"
