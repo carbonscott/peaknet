@@ -28,8 +28,8 @@ torch.autograd.set_detect_anomaly(True)
 logger = logging.getLogger(__name__)
 
 # [[[ USER INPUT ]]]
-timestamp_prev = "2023_0505_1249_26"
-epoch          = 21
+timestamp_prev = None # "2023_0505_1249_26"
+epoch          = None # 21
 
 drc_chkpt = "chkpts"
 fl_chkpt_prev   = None if timestamp_prev is None else f"{timestamp_prev}.epoch_{epoch}.chkpt"
@@ -55,7 +55,7 @@ focal_gamma   = 2 * 10**(0)
 lr           = 10**(-3.0)
 weight_decay = 1e-4
 
-num_gpu     = 2
+num_gpu     = 1
 size_batch  = 10 * num_gpu
 num_workers = 4  * num_gpu    # mutiple of size_sample // size_batch
 seed        = 0
