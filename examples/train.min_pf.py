@@ -13,15 +13,15 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from min_pf.datasets.SFX import SFXMulticlassDataset
-from min_pf.att_unet     import AttentionUNet
-from min_pf.criterion    import CategoricalFocalLoss
-from min_pf.utils        import init_logger, MetaLog, split_dataset, save_checkpoint, load_checkpoint, set_seed, init_weights
+from peaknet.datasets.SFX import SFXMulticlassDataset
+from peaknet.att_unet     import AttentionUNet
+from peaknet.criterion    import CategoricalFocalLoss
+from peaknet.utils        import init_logger, MetaLog, split_dataset, save_checkpoint, load_checkpoint, set_seed, init_weights
 
-from min_pf.trans import RandomShift,  \
-                         RandomRotate, \
-                         RandomPatch,  \
-                         center_crop
+from peaknet.trans import RandomShift,  \
+                          RandomRotate, \
+                          RandomPatch,  \
+                          center_crop
 
 torch.autograd.set_detect_anomaly(True)
 
