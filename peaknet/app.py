@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import os
 import pickle
 import numpy as np
 import cupy  as cp
@@ -11,14 +12,16 @@ import torch.nn.functional as F
 from math import isnan
 from cupyx.scipy import ndimage
 
-from .trans import coord_crop_to_img
+from .att_unet import AttentionUNet
+from .trans    import coord_crop_to_img
 
 
 class PeakFinder:
 
     def __init__(self, path_chkpt = None, path_cheetah_geom = None):
         # Set up default path to load default files...
-        default_path = os.path.abspath(__file__)
+        default_path = os.path.dirname(__file__)
+        default_path = os.path.dirname(default_path)
 
         # [[[ CHECKPOINT ]]]
         self.path_chkpt = os.path.join(default_path, 'data/rayonix.2023_0506_0308_15.chkpt') if path_chkpt is None else \
@@ -27,7 +30,7 @@ class PeakFinder:
 
         # [[[ MODEL ]]]
         # Create model...
-        self.model = self.init_default_model()
+        self.model, self.device = self.init_default_model()
 
         # Load weights...
         self.model.module.load_state_dict(chkpt['model_state_dict']) if hasattr(self.model, 'module') else \
@@ -71,7 +74,7 @@ class PeakFinder:
         model  = torch.nn.DataParallel(model)
         model.to(device)
 
-        return model
+        return model, device
 
 
     def calc_batch_center_of_mass(self, batch_mask):
@@ -642,93 +645,3 @@ class PeakFinder:
         ##     print(f"Time delta ({time_delta_name:20s}): {time_delta * 1e3:.4f} ms.")
 
         return []
-
-
-
-
-class PsanaImg:
-    """
-    It serves as an image accessing layer based on the data management system
-    psana in LCLS.  
-    """
-
-    def __init__(self, exp, run, mode, detector_name):
-        import psana
-
-        # Biolerplate code to access an image
-        # Set up data source
-        self.datasource_id = f"exp={exp}:run={run}:{mode}"
-        self.datasource    = psana.DataSource( self.datasource_id )
-        self.run_current   = next(self.datasource.runs())
-        self.timestamps    = self.run_current.times()
-
-        # Set up detector
-        self.detector = psana.Detector(detector_name)
-
-        # Set image reading mode
-        self.read = { "raw"   : self.detector.raw,
-                      "calib" : self.detector.calib,
-                      "image" : self.detector.image,
-                      "mask"  : self.detector.mask, }
-
-
-    def __len__(self):
-        return len(self.timestamps)
-
-
-    def get(self, event_num, id_panel = None, mode = "calib"):
-        # Fetch the timestamp according to event number...
-        timestamp = self.timestamps[event_num]
-
-        # Access each event based on timestamp...
-        event = self.run_current.event(timestamp)
-
-        # Only two modes are supported...
-        assert mode in ("raw", "calib", "image"), \
-            f"Mode {mode} is not allowed!!!  Only 'raw', 'calib' and 'image' are supported."
-
-        # Fetch image data based on timestamp from detector...
-        data = self.read[mode](event)
-        img  = data[int(id_panel)] if id_panel is not None else data
-
-        return img
-
-
-    def assemble(self, multipanel = None, mode = "image", fake_event_num = 0):
-        # Set up a fake event_num...
-        event_num = fake_event_num
-
-        # Fetch the timestamp according to event number...
-        timestamp = self.timestamps[int(event_num)]
-
-        # Access each event based on timestamp...
-        event = self.run_current.event(timestamp)
-
-        # Fetch image data based on timestamp from detector...
-        img = self.read[mode](event, multipanel)
-
-        return img
-
-
-    def create_bad_pixel_mask(self):
-        return self.read["mask"](self.run_current, calib       = True,
-                                                   status      = True,
-                                                   edges       = True,
-                                                   central     = True,
-                                                   unbond      = True,
-                                                   unbondnbrs  = True,
-                                                   unbondnbrs8 = False).astype(np.uint16)
-
-
-
-
-
-def remove_outliers(data, percentile = 5):
-    """Removes outliers from a numpy array using the IQR method."""
-    q1, q3 = np.percentile(data, [percentile, 100 - percentile])
-    iqr = q3 - q1
-    lower_bound = q1 - 1.5 * iqr
-    upper_bound = q3 + 1.5 * iqr
-    mask = np.logical_and(data >= lower_bound, data <= upper_bound)
-    return data * mask
-
