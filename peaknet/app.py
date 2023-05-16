@@ -13,7 +13,7 @@ from math import isnan
 from cupyx.scipy import ndimage
 
 from .att_unet import AttentionUNet
-from .trans    import coord_crop_to_img
+from .trans    import coord_crop_to_img, center_crop
 
 
 class PeakFinder:
@@ -77,7 +77,8 @@ class PeakFinder:
         return model, device
 
 
-    def calc_batch_center_of_mass(self, batch_mask):
+    def calc_batch_center_of_mass(self, img_stack, batch_mask):
+        img_stack  = cp.asarray(img_stack[:, 0])    # B, C, H, W and C = 1
         batch_mask = cp.asarray(batch_mask)
 
         # Set up structure to find connected component in 2D only...
@@ -96,7 +97,7 @@ class PeakFinder:
         batch_label, batch_num_feature = ndimage.label(batch_mask, structure = structure)
 
         # Calculate batch center of mass...
-        batch_center_of_mass = ndimage.center_of_mass(batch_mask, batch_label, cp.asarray(range(1, batch_num_feature+1)))
+        batch_center_of_mass = ndimage.center_of_mass(img_stack, batch_label, cp.asarray(range(1, batch_num_feature+1)))
 
         return batch_center_of_mass
 
@@ -226,7 +227,7 @@ class PeakFinder:
 
         # Find center of mass for each image in the stack...
         num_stack, _, size_y, size_x = mask_stack_predicted.shape
-        peak_pos_predicted_stack = self.calc_batch_center_of_mass(mask_stack_predicted.view(num_stack, size_y, size_x))
+        peak_pos_predicted_stack = self.calc_batch_center_of_mass(img_stack, mask_stack_predicted.view(num_stack, size_y, size_x))
 
         # A workaround to avoid copying gpu memory to cpu when num of peaks is small...
         if len(peak_pos_predicted_stack) >= min_num_peaks:
@@ -250,7 +251,7 @@ class PeakFinder:
         return peak_list
 
 
-    def find_peak_w_softmax(self, img_stack, min_num_peaks = 15):
+    def find_peak_w_softmax(self, img_stack, min_num_peaks = 15, uses_geom = True, returns_prediction_map = False):
         peak_list = []
 
         # Normalize the image stack...
@@ -264,6 +265,10 @@ class PeakFinder:
         # Convert to probability with the softmax function...
         mask_stack_predicted = fmap_stack.softmax(dim = 1)
 
+        # Guarantee image and prediction mask have the same size...
+        size_y, size_x = img_stack.shape[-2:]
+        mask_stack_predicted = center_crop(mask_stack_predicted, size_y, size_x, returns_offset_tuple = False)
+
         B, C, H, W = mask_stack_predicted.shape
         mask_stack_predicted = mask_stack_predicted.argmax(dim = 1, keepdims = True)
         mask_stack_predicted = F.one_hot(mask_stack_predicted.reshape(B, -1), num_classes = C).permute(0, 2, 1).reshape(B, -1, H, W)
@@ -272,7 +277,7 @@ class PeakFinder:
 
         # Find center of mass for each image in the stack...
         num_stack, size_y, size_x = label_predicted.shape
-        peak_pos_predicted_stack = self.calc_batch_center_of_mass(label_predicted.view(num_stack, size_y, size_x))
+        peak_pos_predicted_stack = self.calc_batch_center_of_mass(img_stack, label_predicted.view(num_stack, size_y, size_x))
 
         # A workaround to avoid copying gpu memory to cpu when num of peaks is small...
         if len(peak_pos_predicted_stack) >= min_num_peaks:
@@ -286,14 +291,18 @@ class PeakFinder:
 
                 y, x = coord_crop_to_img((y, x), img_stack.shape[-2:], label_predicted.shape[-2:])
 
-                x_min, y_min, x_max, y_max = self.cheetah_geom_list[idx_panel]
+                if uses_geom:
+                    x_min, y_min, x_max, y_max = self.cheetah_geom_list[idx_panel]
 
-                x += x_min
-                y += y_min
+                    x += x_min
+                    y += y_min
 
-                peak_list.append((y, x))
+                peak_list.append((idx_panel, y, x))
 
-        return peak_list
+        ret = peak_list
+        if returns_prediction_map: ret = peak_list, label_predicted.cpu().numpy()
+
+        return ret
 
 
     def find_peak_w_softmax_and_perf(self, img_stack, min_num_peaks = 15):
