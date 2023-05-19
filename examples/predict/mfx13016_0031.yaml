@@ -1,0 +1,42 @@
+# ___/ PeakNet model \___
+timestamp            : "2023_0506_0308_15"
+epoch                : 101
+tag                  : ".cpu"
+uses_skip_connection : True
+uses_DataParallel    : True
+
+# ___/ Experimental data \___
+# Psana...
+exp           : "mfx13016"
+run           : 31
+img_load_mode : "calib"
+access_mode   : "idx"
+detector_name : "Rayonix"
+photon_energy : 9.28e3
+encoder_value : 0
+
+# Data range...
+event_min : 0
+event_max : null
+## event_max : 400
+
+# ___/ Peak finding \___
+uses_int_coords: True
+mask_custom_npy: "./results/mask.nozzle+center.npy"
+max_num_peak   : 2048
+num_model_on_gpu : 1
+
+# ___/ Index \___
+## path_cell : null
+path_cell : './results/mfx13016_0031.cell'
+path_geom   : 'results/temp.geom'
+
+# ___/ Output \___
+dir_results : "results"
+pf_tag      : ".mask_nozzle+center"
+index_tag   : ".cell"
+batch_size  : 10
+
+# ___/ Misc \___
+path_cheetah_geom : 'cheetah_geom.pickle'
+num_cpu           : 14
