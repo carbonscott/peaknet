@@ -411,7 +411,8 @@ if mpi_rank == 0:
                 f['/entry_1/result_1/peakYPosRawAll'][event, peak_enum_idx] = cheetahRow
 
         f['/LCLS/detector_1/EncoderValue'       ][0] = encoder_value
-        f['/entry_1/result_1/peakTotalIntensity'][0] = photon_energy
+        f['/LCLS/photon_energy_eV'              ][0] = photon_energy
+        ## f['/entry_1/result_1/peakTotalIntensity'][0] = photon_energy
 
 
     print(f"Main rank is done with merging. [END]")
