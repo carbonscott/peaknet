@@ -146,20 +146,20 @@ if mpi_rank in gpu_worker_ranks:
                 peak_list = [ (_, round(y), round(x)) for _, y, x in peak_list ]
 
             # Save masks...
-            mask_peaknet = prediction_map == 2    # 0 : bg
+            mask_peaknet = prediction_map[:,2]    # 0 : bg
                                                   # 1 : peaks
                                                   # 2 : nozzle ring scattering
                                                   # B, C, H, W
 
-            mask = mask_peaknet.astype(bool)
-            if mask_bad_pixel is not None: mask += mask_bad_pixel[None,].astype(bool)
-            if mask_custom    is not None: mask += mask_custom.astype(bool)
+            mask = mask_peaknet.astype(int)
+            if mask_bad_pixel is not None: mask += (1-mask_bad_pixel[None,].astype(int))
+            if mask_custom    is not None: mask += (1-mask_custom.astype(int))
 
-            # Comply with cheetah format
-            mask = ~mask
+            # Cheetah wants the masked area to be True...
+            mask_to_save = mask.astype(bool)
 
             # Saving...
-            event_filtered_list.append((event, peak_list, mask))
+            event_filtered_list.append((event, peak_list, mask_to_save))
 
         return event_filtered_list
 
@@ -248,7 +248,7 @@ def export(batch_idx, chunk_idx, event_filtered_list, psana_img):
 
             # ...Data
             img = psana_img.get(event, None, img_load_mode)
-            f['/entry_1/data_1/data'][event_enum_idx] = img[0]     # !!!CAVEAT (B, H, W), B = 1
+            f['/entry_1/data_1/data'][event_enum_idx] = img     # !!!CAVEAT (H, W)
 
             # ...Mask
             f['/entry_1/data_1/mask'][event_enum_idx] = mask[0]    # !!!CAVEAT (B, H, W), B = 1
