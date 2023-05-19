@@ -300,7 +300,8 @@ class PeakFinder:
                 peak_list.append((idx_panel, y, x))
 
         ret = peak_list
-        if returns_prediction_map: ret = peak_list, label_predicted.cpu().numpy()
+        ## if returns_prediction_map: ret = peak_list, label_predicted.cpu().numpy()
+        if returns_prediction_map: ret = peak_list, mask_stack_predicted.cpu().numpy()
 
         return ret
 
