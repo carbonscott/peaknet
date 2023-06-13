@@ -21,7 +21,6 @@ class PeakFinder:
     def __init__(self, path_chkpt = None, path_cheetah_geom = None):
         # Set up default path to load default files...
         default_path = os.path.dirname(__file__)
-        default_path = os.path.dirname(default_path)
 
         # [[[ CHECKPOINT ]]]
         self.path_chkpt = os.path.join(default_path, 'data/rayonix.2023_0506_0308_15.chkpt') if path_chkpt is None else \
@@ -251,7 +250,7 @@ class PeakFinder:
         return peak_list
 
 
-    def find_peak_w_softmax(self, img_stack, min_num_peaks = 15, uses_geom = True, returns_prediction_map = False):
+    def find_peak_w_softmax(self, img_stack, min_num_peaks = 15, uses_geom = True, returns_prediction_map = False, uses_mixed_precision = True):
         peak_list = []
 
         # Normalize the image stack...
@@ -260,7 +259,11 @@ class PeakFinder:
         # Get activation feature map given the image stack...
         self.model.eval()
         with torch.no_grad():
-            fmap_stack = self.model.forward(img_stack)
+            if uses_mixed_precision:
+                with torch.cuda.amp.autocast(dtype = torch.float16):
+                    fmap_stack = self.model.forward(img_stack)
+            else:
+                fmap_stack = self.model.forward(img_stack)
 
         # Convert to probability with the softmax function...
         mask_stack_predicted = fmap_stack.softmax(dim = 1)
@@ -306,22 +309,28 @@ class PeakFinder:
         return ret
 
 
-    def find_peak_w_softmax_and_perf(self, img_stack, min_num_peaks = 15):
+    def find_peak_w_softmax_and_perf(self, img_stack, min_num_peaks = 15, uses_geom = True, returns_prediction_map = False, uses_mixed_precision = True):
         import time
 
         peak_list = []
 
+        time_start = time.time()
         # Normalize the image stack...
         img_stack = (img_stack - img_stack.mean(axis = (-1, -2), keepdim = True)) / img_stack.std(axis = (-1, -2), keepdim = True)
+        time_end = time.time()
+        time_delta = time_end - time_start
+        time_delta_name = 'pf:Normalize'
+        print(f"Time delta ({time_delta_name:20s}): {time_delta * 1e3:.4f} ms.")
 
         # Get activation feature map given the image stack...
         self.model.eval()
-
         time_start = time.time()
-
         with torch.no_grad():
-            fmap_stack = self.model.forward(img_stack)
-
+            if uses_mixed_precision:
+                with torch.cuda.amp.autocast(dtype = torch.float16):
+                    fmap_stack = self.model.forward(img_stack)
+            else:
+                fmap_stack = self.model.forward(img_stack)
         time_end = time.time()
         time_delta = time_end - time_start
         time_delta_name = 'pf:Inference'
@@ -331,23 +340,29 @@ class PeakFinder:
         # Convert to probability with the softmax function...
         mask_stack_predicted = fmap_stack.softmax(dim = 1)
 
+        # Guarantee image and prediction mask have the same size...
+        size_y, size_x = img_stack.shape[-2:]
+        mask_stack_predicted = center_crop(mask_stack_predicted, size_y, size_x, returns_offset_tuple = False)
+        time_end = time.time()
+        time_delta = time_end - time_start
+        time_delta_name = 'pf:Crop'
+        print(f"Time delta ({time_delta_name:20s}): {time_delta * 1e3:.4f} ms.")
+
+        time_start = time.time()
         B, C, H, W = mask_stack_predicted.shape
         mask_stack_predicted = mask_stack_predicted.argmax(dim = 1, keepdims = True)
         mask_stack_predicted = F.one_hot(mask_stack_predicted.reshape(B, -1), num_classes = C).permute(0, 2, 1).reshape(B, -1, H, W)
         label_predicted = mask_stack_predicted[:, 1]
         label_predicted = label_predicted.to(torch.int)
-
         time_end = time.time()
         time_delta = time_end - time_start
         time_delta_name = 'pf:Softmax'
         print(f"Time delta ({time_delta_name:20s}): {time_delta * 1e3:.4f} ms.")
 
         time_start = time.time()
-
         # Find center of mass for each image in the stack...
         num_stack, size_y, size_x = label_predicted.shape
-        peak_pos_predicted_stack = self.calc_batch_center_of_mass(label_predicted.view(num_stack, size_y, size_x))
-
+        peak_pos_predicted_stack = self.calc_batch_center_of_mass(img_stack, label_predicted.view(num_stack, size_y, size_x))
         time_end = time.time()
         time_delta = time_end - time_start
         time_delta_name = 'pf:map to peak'
@@ -365,14 +380,19 @@ class PeakFinder:
 
                 y, x = coord_crop_to_img((y, x), img_stack.shape[-2:], label_predicted.shape[-2:])
 
-                x_min, y_min, x_max, y_max = self.cheetah_geom_list[idx_panel]
+                if uses_geom:
+                    x_min, y_min, x_max, y_max = self.cheetah_geom_list[idx_panel]
 
-                x += x_min
-                y += y_min
+                    x += x_min
+                    y += y_min
 
-                peak_list.append((y, x))
+                peak_list.append((idx_panel, y, x))
 
-        return peak_list
+        ret = peak_list, None
+        ## if returns_prediction_map: ret = peak_list, label_predicted.cpu().numpy()
+        if returns_prediction_map: ret = peak_list, mask_stack_predicted.cpu().numpy()
+
+        return ret
 
 
     def save_peak_and_fmap(self, img_stack, threshold_prob = 1 - 1e-4):
