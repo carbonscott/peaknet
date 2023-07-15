@@ -71,7 +71,8 @@ installtation guide below.
     conda install matplotlib
     ```
 
-- Finally, install `peaknet` directly with a `github` link.
+- Finally, install `peaknet` directly with a `github` link (it should take less
+  than one minute to install).
 
     ```
     pip install git+https://github.com/carbonscott/peaknet --upgrade
