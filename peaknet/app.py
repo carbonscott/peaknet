@@ -77,6 +77,40 @@ class PeakFinder:
 
 
     def calc_batch_center_of_mass(self, img_stack, batch_mask):
+        # Obtain the tensor dimension...
+        B, H, W = batch_mask.shape
+
+        # Create B streams for connected component analysis...
+        cuda_streams = [cp.cuda.Stream() for _ in range(B)]
+        batch_center_of_mass = [ [] for _ in range(B) ]
+        for i in range(B):
+            print(f"Working on stream {i}...")
+            with cuda_streams[i]:
+                # Fetch an image and its mask...
+                img  = cp.asarray(img_stack[i, 0])    # B, C, H, W and C = 1
+                mask = cp.asarray(batch_mask[i])
+
+                # Create the kernel for connected comonent analysis in this stream...
+                structure = cp.array([[1,1,1],
+                                      [1,1,1],
+                                      [1,1,1]])
+
+                # Fetch labels...
+                label, num_feature = ndimage.label(mask, structure = structure)
+
+                # Calculate batch center of mass...
+                center_of_mass = ndimage.center_of_mass(img, label, cp.asarray(range(1, num_feature+1)))
+                batch_center_of_mass[i] = center_of_mass
+
+        ## for i in range(B):
+        ##     cuda_streams[i].synchronize()
+
+        batch_center_of_mass = [ (i, y.get(), x.get()) for i, center_of_mass in enumerate(batch_center_of_mass) for y, x in center_of_mass ]
+
+        return batch_center_of_mass
+
+
+    def calc_batch_center_of_mass_slow(self, img_stack, batch_mask):
         img_stack  = cp.asarray(img_stack[:, 0])    # B, C, H, W and C = 1
         batch_mask = cp.asarray(batch_mask)
 
@@ -286,7 +320,8 @@ class PeakFinder:
         if len(peak_pos_predicted_stack) >= min_num_peaks:
             # Convert to cheetah coordinates...
             for peak_pos in peak_pos_predicted_stack:
-                idx_panel, y, x = peak_pos.get()
+                ## idx_panel, y, x = peak_pos.get()
+                idx_panel, y, x = peak_pos
 
                 if isnan(y) or isnan(x): continue
 
