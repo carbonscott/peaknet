@@ -84,7 +84,6 @@ class PeakFinder:
         cuda_streams = [cp.cuda.Stream() for _ in range(B)]
         batch_center_of_mass = [ [] for _ in range(B) ]
         for i in range(B):
-            print(f"Working on stream {i}...")
             with cuda_streams[i]:
                 # Fetch an image and its mask...
                 img  = cp.asarray(img_stack[i, 0])    # B, C, H, W and C = 1
@@ -102,8 +101,8 @@ class PeakFinder:
                 center_of_mass = ndimage.center_of_mass(img, label, cp.asarray(range(1, num_feature+1)))
                 batch_center_of_mass[i] = center_of_mass
 
-        ## for i in range(B):
-        ##     cuda_streams[i].synchronize()
+        for i in range(B):
+            cuda_streams[i].synchronize()
 
         batch_center_of_mass = [ (i, y.get(), x.get()) for i, center_of_mass in enumerate(batch_center_of_mass) for y, x in center_of_mass ]
 
