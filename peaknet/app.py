@@ -336,7 +336,7 @@ class PeakFinder:
 
                 peak_list.append((idx_panel, y, x))
 
-        ret = peak_list
+        ret = peak_list, None
         ## if returns_prediction_map: ret = peak_list, label_predicted.cpu().numpy()
         if returns_prediction_map: ret = peak_list, mask_stack_predicted.cpu().numpy()
 
@@ -406,7 +406,8 @@ class PeakFinder:
         if len(peak_pos_predicted_stack) >= min_num_peaks:
             # Convert to cheetah coordinates...
             for peak_pos in peak_pos_predicted_stack:
-                idx_panel, y, x = peak_pos.get()
+                ## idx_panel, y, x = peak_pos.get()
+                idx_panel, y, x = peak_pos
 
                 if isnan(y) or isnan(x): continue
 
