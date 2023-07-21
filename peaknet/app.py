@@ -70,7 +70,8 @@ class PeakFinder:
 
         # Set device...
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model  = torch.nn.DataParallel(model)
+        if torch.cuda.device_count() > 1:
+            model  = torch.nn.DataParallel(model)
         model.to(device)
 
         return model, device
