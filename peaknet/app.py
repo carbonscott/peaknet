@@ -45,16 +45,11 @@ class PeakFinder:
         self.cheetah_geom_list = list(cheetah_geom_dict.values())[::2]
 
         # Set up structure to find connected component in 2D only...
-        self.structure = cp.zeros((3, 3, 3))
-        #                     ^  ^^^^
-        # batch_______________|   |
-        #                         |
-        # 2D image________________|
+        self.structure = cp.array([[1,1,1],
+                                   [1,1,1],
+                                   [1,1,1]])
 
-        # Define structure in 2D image at the middle layer
-        self.structure[1] = cp.array([[1,1,1],
-                                      [1,1,1],
-                                      [1,1,1]])
+        self.model.eval()
 
 
 
@@ -78,61 +73,78 @@ class PeakFinder:
 
 
     def calc_batch_center_of_mass(self, img_stack, batch_mask):
+        structure = self.structure
+
+        imgs  = cp.asarray(img_stack[:, 0])
+        masks = cp.asarray(batch_mask)
+
         # Obtain the tensor dimension...
         B, H, W = batch_mask.shape
 
-        # Create B streams for connected component analysis...
-        cuda_streams = [cp.cuda.Stream() for _ in range(B)]
         batch_center_of_mass = [ [] for _ in range(B) ]
         for i in range(B):
-            with cuda_streams[i]:
-                # Fetch an image and its mask...
-                img  = cp.asarray(img_stack[i, 0])    # B, C, H, W and C = 1
-                mask = cp.asarray(batch_mask[i])
+            img  = imgs[i]
+            mask = masks[i]
 
-                # Create the kernel for connected comonent analysis in this stream...
-                structure = cp.array([[1,1,1],
-                                      [1,1,1],
-                                      [1,1,1]])
+            # Fetch labels...
+            label, num_feature = ndimage.label(mask, structure = structure)
 
-                # Fetch labels...
-                label, num_feature = ndimage.label(mask, structure = structure)
-
-                # Calculate batch center of mass...
-                center_of_mass = ndimage.center_of_mass(img, label, cp.asarray(range(1, num_feature+1)))
-                batch_center_of_mass[i] = center_of_mass
-
-        for i in range(B):
-            cuda_streams[i].synchronize()
+            # Calculate batch center of mass...
+            center_of_mass = ndimage.center_of_mass(img, label, cp.asarray(range(1, num_feature+1)))
+            batch_center_of_mass[i] = center_of_mass
 
         batch_center_of_mass = [ (i, y.get(), x.get()) for i, center_of_mass in enumerate(batch_center_of_mass) for y, x in center_of_mass ]
 
         return batch_center_of_mass
 
 
-    def calc_batch_center_of_mass_slow(self, img_stack, batch_mask):
-        img_stack  = cp.asarray(img_stack[:, 0])    # B, C, H, W and C = 1
-        batch_mask = cp.asarray(batch_mask)
+    ## def calc_batch_center_of_mass(self, img_stack, batch_mask):
+    ##     # Obtain the tensor dimension...
+    ##     B, H, W = batch_mask.shape
 
-        # Set up structure to find connected component in 2D only...
-        structure = cp.zeros((3, 3, 3))
-        #                     ^  ^^^^
-        # batch_______________|   |
-        #                         |
-        # 2D image________________|
+    ##     # Create B streams for connected component analysis...
+    ##     cuda_streams = [cp.cuda.Stream() for _ in range(B)]
+    ##     batch_center_of_mass = [ [] for _ in range(B) ]
+    ##     for i in range(B):
+    ##         with cuda_streams[i]:
+    ##             # Fetch an image and its mask...
+    ##             img  = cp.asarray(img_stack[i, 0])    # B, C, H, W and C = 1
+    ##             mask = cp.asarray(batch_mask[i])
 
-        # Define structure in 2D image at the middle layer
-        structure[1] = cp.array([[1,1,1],
-                                 [1,1,1],
-                                 [1,1,1]])
+    ##             # Create the kernel for connected comonent analysis in this stream...
+    ##             structure = cp.array([[1,1,1],
+    ##                                   [1,1,1],
+    ##                                   [1,1,1]])
 
-        # Fetch labels...
-        batch_label, batch_num_feature = ndimage.label(batch_mask, structure = structure)
+    ##             # Fetch labels...
+    ##             label, num_feature = ndimage.label(mask, structure = structure)
 
-        # Calculate batch center of mass...
-        batch_center_of_mass = ndimage.center_of_mass(img_stack, batch_label, cp.asarray(range(1, batch_num_feature+1)))
+    ##             # Calculate batch center of mass...
+    ##             center_of_mass = ndimage.center_of_mass(img, label, cp.asarray(range(1, num_feature+1)))
+    ##             batch_center_of_mass[i] = center_of_mass
 
-        return batch_center_of_mass
+    ##     for i in range(B):
+    ##         cuda_streams[i].synchronize()
+
+    ##     batch_center_of_mass = [ (i, y.get(), x.get()) for i, center_of_mass in enumerate(batch_center_of_mass) for y, x in center_of_mass ]
+
+    ##     return batch_center_of_mass
+
+
+    ## def calc_batch_center_of_mass(self, img_stack, batch_mask):
+    ##     img_stack  = cp.asarray(img_stack[:, 0])    # B, C, H, W and C = 1
+    ##     batch_mask = cp.asarray(batch_mask)
+
+    ##     # Set up structure to find connected component in 2D only...
+    ##     structure = self.structure
+
+    ##     # Fetch labels...
+    ##     batch_label, batch_num_feature = ndimage.label(batch_mask, structure = structure)
+
+    ##     # Calculate batch center of mass...
+    ##     batch_center_of_mass = ndimage.center_of_mass(img_stack, batch_label, cp.asarray(range(1, batch_num_feature+1)))
+
+    ##     return batch_center_of_mass
 
 
     def calc_batch_center_of_mass_perf(self, batch_mask):
@@ -291,7 +303,7 @@ class PeakFinder:
         img_stack = (img_stack - img_stack.mean(axis = (-1, -2), keepdim = True)) / img_stack.std(axis = (-1, -2), keepdim = True)
 
         # Get activation feature map given the image stack...
-        self.model.eval()
+        ## self.model.eval()
         with torch.no_grad():
             if uses_mixed_precision:
                 with torch.cuda.amp.autocast(dtype = torch.float16):
