@@ -377,6 +377,34 @@ def center_crop(img, size_y_crop, size_x_crop, returns_offset_tuple = False):
 
 
 
+## def center_crop(img, size_y_crop, size_x_crop, returns_offset_tuple=False):
+##     ''' 
+##     Return the cropped area and associated offset for coordinate transformation
+##     purposes.
+##     ''' 
+##     # Get the size of the original image
+##     size_y_img, size_x_img = img.shape[-2:]
+## 
+##     # Calculate crop indices
+##     y_min_crop = (size_y_img - size_y_crop) // 2
+##     x_min_crop = (size_x_img - size_x_crop) // 2
+## 
+##     # Crop the image using torch.narrow
+##     img_crop = img.narrow(-2, y_min_crop, size_y_crop).narrow(-1, x_min_crop, size_x_crop)
+## 
+##     if returns_offset_tuple:
+##         # Calculate the offset introduced due to the integer division
+##         y_min_crop_float = (size_y_img - size_y_crop) / 2 
+##         x_min_crop_float = (size_x_img - size_x_crop) / 2 
+##         offset_tuple = (y_min_crop_float - y_min_crop, x_min_crop_float - x_min_crop)
+## 
+##         return img_crop, offset_tuple
+## 
+##     return img_crop
+
+
+
+
 def coord_img_to_crop(coord_tuple, size_img_tuple, size_crop_tuple, offset_tuple = ()):
     '''
     Need some unit test.
