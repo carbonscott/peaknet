@@ -100,18 +100,20 @@ class Crop:
 
 
 class Resize:
-    def __init__(self, size_y, size_x):
-        self.size_y = size_y
-        self.size_x = size_x
+    def __init__(self, size_y, size_x, anti_aliasing = True):
+        self.size_y        = size_y
+        self.size_x        = size_x
+        self.anti_aliasing = anti_aliasing
 
 
     def __call__(self, img):
-        size_y = self.size_y
-        size_x = self.size_x
+        size_y        = self.size_y
+        size_x        = self.size_x
+        anti_aliasing = self.anti_aliasing
 
         B = img.shape[0]
 
-        img_resize = resize(img, (B, size_y, size_x), anti_aliasing = True)
+        img_resize = resize(img, (B, size_y, size_x), anti_aliasing = anti_aliasing)
 
         return img_resize
 
