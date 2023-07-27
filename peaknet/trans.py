@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import random
 
+import torch.nn.functional as F
+
 from skimage.transform import resize
 from scipy.ndimage     import rotate
 
@@ -116,6 +118,58 @@ class Resize:
         img_resize = resize(img, (B, size_y, size_x), anti_aliasing = anti_aliasing)
 
         return img_resize
+
+
+
+
+## class Downsample:
+##     def __init__(self, block_size = 2, func = np.max, cval = 0, func_kwargs = None):
+##         self.block_size  = block_size
+##         self.func        = func
+##         self.cval        = cval
+##         self.func_kwargs = func_kwargs
+## 
+## 
+##     def __call__(self, img):
+##         block_size  = self.block_size
+##         func        = self.func
+##         cval        = self.cval
+##         func_kwargs = self.func_kwargs
+## 
+##         img_downsampled = block_reduce(img, block_size = block_size, func = func, cval = cval, func_kwargs = func_kwargs)
+## 
+##         return img_downsampled
+
+
+
+
+class MaxPool2D:
+    def __init__(self, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False):
+        self.kernel_size    = kernel_size
+        self.stride         = stride
+        self.padding        = padding
+        self.dilation       = dilation
+        self.ceil_mode      = ceil_mode
+        self.return_indices = return_indices
+
+        return None
+
+
+    def __call__(self, img):
+        kernel_size    = self.kernel_size
+        padding        = self.padding
+        stride         = self.stride
+        dilation       = self.dilation
+        ceil_mode      = self.ceil_mode
+        return_indices = self.return_indices
+
+        B, H, W = img.shape
+        img_torch = torch.tensor(img).view(B, 1, H, W)
+        img_downsampled = F.max_pool2d(img_torch, kernel_size, stride, padding, dilation, ceil_mode, return_indices)
+
+        B, _, H_down, W_down = img_downsampled.shape
+
+        return img_downsampled.view(B, H_down, W_down).numpy()
 
 
 
