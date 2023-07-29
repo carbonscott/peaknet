@@ -37,7 +37,8 @@ path_chkpt_prev = None if fl_chkpt_prev is None else os.path.join(drc_chkpt, fl_
 
 # Set up parameters for an experiment...
 drc_dataset  = 'datasets'
-fl_dataset   = 'mfx13016_0028_N68+mfxp22820_0013_N37+mfx13016_0028_N63_low_photon.68v37v30.data.label_corrected.npy'       # size_sample = 3000
+## fl_dataset   = 'mfx13016_0028_N68+mfxp22820_0013_N37+mfx13016_0028_N63_low_photon.68v37v30.data.npy'       # size_sample = 3000
+fl_dataset = 'mfx13016_0028_N68+mfxp22820_0013_N37+mfx13016_0028_N63_low_photon.68v37v30.data.downsize_by_4.label_corrected.npy'
 path_dataset = os.path.join(drc_dataset, fl_dataset)
 
 size_sample   = 3000
@@ -56,8 +57,8 @@ lr           = 10**(-3.0)
 weight_decay = 1e-4
 
 num_gpu     = 1
-size_batch  = 10 * num_gpu
-num_workers = 4  * num_gpu    # mutiple of size_sample // size_batch
+size_batch  = 100  * num_gpu
+num_workers = 40   * num_gpu    # mutiple of size_sample // size_batch
 seed        = 0
 
 # Clarify the purpose of this experiment...
@@ -102,14 +103,15 @@ set_seed(seed)
 
 # Set up transformation rules
 num_patch      = 50
-size_patch     = 100
+size_patch     = 100 // 4
 frac_shift_max = 0.2
 angle_max      = 360
 
+# ...Set up transform
 trans_list = (
+    RandomPatch(num_patch = num_patch, size_patch_y = size_patch, size_patch_x = size_patch, var_patch_y = 0.2, var_patch_x = 0.2),
     RandomRotate(angle_max = angle_max, order = 0),
     RandomShift(frac_shift_max, frac_shift_max),
-    RandomPatch(num_patch = num_patch, size_patch_y = size_patch, size_patch_x = size_patch, var_patch_y = 0.2, var_patch_x = 0.2),
 )
 
 # Define the training set
@@ -192,7 +194,7 @@ scheduler = ReduceLROnPlateau(optimizer, mode           = 'min',
 
 
 # [[[ TRAIN LOOP ]]]
-max_epochs = 3000
+max_epochs = 1000
 
 # From a prev training???
 epoch_min = 0

@@ -14,7 +14,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from peaknet.datasets.SFX import SFXMulticlassDataset
-from peaknet.modeling.net import PeakNet
+from peaknet.att_unet     import AttentionUNet
 from peaknet.criterion    import CategoricalFocalLoss
 from peaknet.utils        import init_logger, MetaLog, split_dataset, save_checkpoint, load_checkpoint, set_seed, init_weights
 
@@ -37,7 +37,7 @@ path_chkpt_prev = None if fl_chkpt_prev is None else os.path.join(drc_chkpt, fl_
 
 # Set up parameters for an experiment...
 drc_dataset  = 'datasets'
-fl_dataset   = 'mfx13016_0028_N68+mfxp22820_0013_N37+mfx13016_0028_N63_low_photon.68v37v30.data.label_corrected.npy'       # size_sample = 3000
+fl_dataset   = 'mfx13016_0028_N68+mfxp22820_0013_N37+mfx13016_0028_N63_low_photon.68v37v30.data.npy'       # size_sample = 3000
 path_dataset = os.path.join(drc_dataset, fl_dataset)
 
 size_sample   = 3000
@@ -49,7 +49,7 @@ uses_skip_connection = True    # Default: True
 uses_mixed_precision = True
 
 base_channels = 8
-focal_alpha   = 1.0 * 10**(0)
+focal_alpha   = 1.2 * 10**(0)
 focal_gamma   = 2 * 10**(0)
 
 lr           = 10**(-3.0)
@@ -136,31 +136,16 @@ dataloader_validate = torch.utils.data.DataLoader( dataset_validate,
                                                    shuffle     = False,
                                                    pin_memory  = True,
                                                    batch_size  = size_batch,
-                                                   num_workers = num_workers, )
+                                                   num_workers = num_workers//2, )
 
 
 # [[[ MODEL ]]]
-# Config the channels in the network...
-config_channels = {
-    "input_layer"    : (1, 8),
-    "encoder_layers" : (
-        (8,  16),
-        (16, 32),
-        (32, 64),
-        (64, 128),
-    ),
-    "fusion_layers" : (
-        (128, 64),
-        (64,  32),
-        (32,  16),
-        (16,   8),
-    ),
-    "head_segmask_layer": (8, 3),
-}
-
 # Use the model architecture -- attention u-net...
-model = PeakNet( config_channels = config_channels,
-                 uses_skip_connection = uses_skip_connection, )
+model = AttentionUNet( base_channels        = base_channels,
+                       in_channels          = 1,
+                       out_channels         = 3,
+                       uses_skip_connection = uses_skip_connection,
+                       att_gate_channels    = None, )
 
 # Initialize weights...
 model.apply(init_weights)
@@ -169,9 +154,8 @@ model.apply(init_weights)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Move model to gpu(s)...
-# [IMPROVE] Replace the following with ddp
-## if torch.cuda.device_count() > 1:
-##    model = nn.DataParallel(model)
+if torch.cuda.device_count() > 1:
+    model = nn.DataParallel(model)
 model.to(device)
 
 
