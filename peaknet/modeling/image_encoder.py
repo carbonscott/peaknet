@@ -28,7 +28,6 @@ class ImageEncoder(nn.Module):
             for in_channels, out_channels in layer_channels
         ])
 
-        self.fmap_in_layers = []
 
 
     def _make_layer(self, in_channels, out_channels):
@@ -54,15 +53,16 @@ class ImageEncoder(nn.Module):
 
     def forward(self, x):
         saves_feature_per_layer = self.saves_feature_per_layer
+        fmap_in_layers = []
 
         # Pass the input through the input layer...
         x = self.input_layer(x)
-        if saves_feature_per_layer: self.fmap_in_layers.append(x)
+        if saves_feature_per_layer: fmap_in_layers.append(x)
 
         # Pass the feature map through a series of encoding layer...
         for encoder_layer in self.encoder_layers:
             x = encoder_layer(x)
-            if saves_feature_per_layer: self.fmap_in_layers.append(x)
+            if saves_feature_per_layer: fmap_in_layers.append(x)
 
-        ret = self.fmap_in_layers if saves_feature_per_layer else x
+        ret = fmap_in_layers if saves_feature_per_layer else x
         return ret
