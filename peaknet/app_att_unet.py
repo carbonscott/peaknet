@@ -12,8 +12,8 @@ import torch.nn.functional as F
 from math import isnan
 from cupyx.scipy import ndimage
 
-from .modeling.net import PeakNet
-from .trans        import coord_crop_to_img, center_crop
+from .modeling.att_unet import PeakNet
+from .trans             import coord_crop_to_img, center_crop
 
 
 class PeakFinderRefactor:

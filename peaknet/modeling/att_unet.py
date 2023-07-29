@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .image_encoder import ImageEncoder
-from .fusion        import FusionBlock
+from .image_encoder    import ImageEncoder
+from .att_gated_fusion import FusionBlock
 
 
 class PeakNet(nn.Module):
