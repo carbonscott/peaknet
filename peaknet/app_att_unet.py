@@ -16,7 +16,8 @@ from .modeling.att_unet import PeakNet
 from .trans             import coord_crop_to_img, center_crop
 
 
-class PeakFinderRefactor:
+## class PeakFinderRefactor:
+class PeakFinder:
 
     def __init__(self, path_chkpt = None, path_cheetah_geom = None):
         # Set up default path to load default files...
