@@ -199,6 +199,22 @@ class PeakFinder:
         return peak_list
 
 
+    def calc_fmap(self, img_stack, uses_mixed_precision = True):
+        # Normalize the image stack...
+        img_stack = (img_stack - img_stack.mean(axis = (-1, -2), keepdim = True)) / img_stack.std(axis = (-1, -2), keepdim = True)
+
+        # Get activation feature map given the image stack...
+        ## self.model.eval()
+        with torch.no_grad():
+            if uses_mixed_precision:
+                with torch.cuda.amp.autocast(dtype = torch.float16):
+                    fmap_stack = self.model.forward(img_stack)
+            else:
+                fmap_stack = self.model.forward(img_stack)
+
+        return fmap_stack
+
+
     def find_peak_w_softmax(self, img_stack, min_num_peaks = 0, uses_geom = True, returns_prediction_map = False, uses_mixed_precision = True):
         peak_list = []
 
