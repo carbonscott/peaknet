@@ -55,6 +55,7 @@ class CXIManager:
         for path_cxi in path_cxi_list:
             # Open a new file???
             if path_cxi not in cxi_dict:
+                print(f"Opening {path_cxi}...")
                 cxi_dict[path_cxi] = {
                     "file_handle" : h5py.File(path_cxi, 'r'),
                     "is_open"     : True,
