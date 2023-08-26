@@ -118,11 +118,11 @@ trans_list = (
 )
 
 # Define the training set
-dataset_train = CXIDataset(cxi_manager = cxi_manager,
-                              idx_list = data_train_idx_list,
-                              trans_list = None,
-                              normalizes_data = True,
-                              reverses_bg = False)
+dataset_train = CXIDataset(cxi_manager     = cxi_manager,
+                           idx_list        = data_train_idx_list,
+                           trans_list      = None,
+                           normalizes_data = True,
+                           reverses_bg     = False)
 dataloader_train = torch.utils.data.DataLoader( dataset_train,
                                                 shuffle     = False,
                                                 pin_memory  = True,
@@ -130,11 +130,11 @@ dataloader_train = torch.utils.data.DataLoader( dataset_train,
                                                 num_workers = num_workers, )
 
 # Define validation set...
-dataset_validate = CXIDataset(cxi_manager = cxi_manager,
-                              idx_list = data_validate_idx_list,
-                              trans_list = None,
+dataset_validate = CXIDataset(cxi_manager     = cxi_manager,
+                              idx_list        = data_validate_idx_list,
+                              trans_list      = None,
                               normalizes_data = True,
-                              reverses_bg = False)
+                              reverses_bg     = False)
 dataloader_validate = torch.utils.data.DataLoader( dataset_validate,
                                                    shuffle     = False,
                                                    pin_memory  = True,
