@@ -7,11 +7,12 @@ import torch.nn.functional as F
 
 
 class CategoricalFocalLoss(nn.Module):
-    def __init__(self, alpha, gamma):
+    def __init__(self, alpha, gamma, num_classes = 3):
         super().__init__()
 
         self.alpha = alpha
         self.gamma = gamma
+        self.num_classes = num_classes
 
 
     def forward(self, batch_fmap_predicted, batch_mask_true):
@@ -47,4 +48,4 @@ class CategoricalFocalLoss(nn.Module):
         '''
         B, C, H, W = batch_mask_true.shape
 
-        return F.one_hot(batch_mask_true.to(torch.long).reshape(B, -1)).permute(0, 2, 1).reshape(B, -1, H, W)
+        return F.one_hot(batch_mask_true.to(torch.long).reshape(B, -1), num_classes = self.num_classes).permute(0, 2, 1).reshape(B, -1, H, W)
