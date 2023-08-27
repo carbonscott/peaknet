@@ -27,15 +27,15 @@ torch.autograd.set_detect_anomaly(True)
 logger = logging.getLogger(__name__)
 
 # [[[ USER INPUT ]]]
-timestamp_prev = None # "2023_0505_1249_26"
-epoch          = None # 21
+timestamp_prev = None # "2023_0827_1039_31"
+epoch          = None # 75
 
 drc_chkpt = "chkpts"
 fl_chkpt_prev   = None if timestamp_prev is None else f"{timestamp_prev}.epoch_{epoch}.chkpt"
 path_chkpt_prev = None if fl_chkpt_prev is None else os.path.join(drc_chkpt, fl_chkpt_prev)
 
 # Set up parameters for an experiment...
-path_yaml   = 'train.cxic00318_run0123.yaml'
+path_yaml   = 'train.cxic00318_run0123.autolabel.yaml'
 frac_train  = 0.8
 size_sample_train = 3000
 size_sample_validate = 1500
@@ -54,6 +54,7 @@ focal_gamma   = 2 * 10**(0)
 
 lr           = 10**(-3.0)
 weight_decay = 1e-4
+grad_clip    = 1.0
 
 num_gpu     = 1
 size_batch  = 10 * num_gpu
@@ -243,9 +244,12 @@ for epoch in tqdm.tqdm(range(max_epochs)):
                 loss = criterion(batch_output, batch_target_crop)
                 loss = loss.mean()    # Collapse all losses if they are scattered on multiple gpus
 
-            # Backward pass and optimization...
+            # Backward pass, optional gradient clipping and optimization...
             optimizer.zero_grad()
             scaler.scale(loss).backward()
+            if grad_clip != 0.0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             scaler.step(optimizer)
             scaler.update()
         else:
@@ -260,9 +264,11 @@ for epoch in tqdm.tqdm(range(max_epochs)):
             loss = criterion(batch_output, batch_target_crop)
             loss = loss.mean()    # Collapse all losses if they are scattered on multiple gpus
 
-            # Backward pass and optimization...
+            # Backward pass, optional gradient clipping and optimization...
             optimizer.zero_grad()
             loss.backward()
+            if grad_clip != 0.0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step()
 
         # Reporting...
