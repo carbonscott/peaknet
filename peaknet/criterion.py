@@ -7,12 +7,16 @@ import torch.nn.functional as F
 
 
 class CategoricalFocalLoss(nn.Module):
-    def __init__(self, alpha, gamma, num_classes = 3):
+    def __init__(self, alpha, gamma, num_classes = 3, uses_mixed_precision = False):
         super().__init__()
 
         self.alpha = alpha
         self.gamma = gamma
         self.num_classes = num_classes
+        self.uses_mixed_precision = uses_mixed_precision
+
+        self.min_clamp = 1e-4   if self.uses_mixed_precision else 1e-8
+        self.max_clamp = 1-1e-4 if self.uses_mixed_precision else 1-1e-8
 
 
     def forward(self, batch_fmap_predicted, batch_mask_true):
@@ -33,7 +37,7 @@ class CategoricalFocalLoss(nn.Module):
         alpha = self.alpha
         gamma = self.gamma
 
-        y_pred = y_pred.clamp(min=1e-8, max=1-1e-8)
+        y_pred = y_pred.clamp(min=self.min_clamp, max=self.max_clamp)
 
         cross_entropy = -y * y_pred.log()
         loss = alpha * (1 - y_pred)**gamma * cross_entropy
