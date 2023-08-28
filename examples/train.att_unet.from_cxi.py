@@ -27,8 +27,8 @@ torch.autograd.set_detect_anomaly(True)
 logger = logging.getLogger(__name__)
 
 # [[[ USER INPUT ]]]
-timestamp_prev = None # "2023_0827_1039_31"
-epoch          = None # 75
+timestamp_prev = None # "2023_0825_2111_46"
+epoch          = None # 57
 
 drc_chkpt = "chkpts"
 fl_chkpt_prev   = None if timestamp_prev is None else f"{timestamp_prev}.epoch_{epoch}.chkpt"
@@ -45,7 +45,7 @@ frac_validate = 1.0
 dataset_usage = 'train'
 
 uses_skip_connection = True    # Default: True
-uses_mixed_precision = True
+uses_mixed_precision = True    # Default: True
 num_classes          = 3
 
 base_channels = 8
@@ -180,7 +180,10 @@ model.to(device)
 
 
 # [[[ CRITERION ]]]
-criterion = CategoricalFocalLoss(alpha = focal_alpha, gamma = focal_gamma, num_classes = num_classes)
+criterion = CategoricalFocalLoss(alpha                = focal_alpha,
+                                 gamma                = focal_gamma,
+                                 num_classes          = num_classes,
+                                 uses_mixed_precision = uses_mixed_precision)
 
 # [[[ OPTIMIZER ]]]
 param_iter = model.module.parameters() if hasattr(model, "module") else model.parameters()
