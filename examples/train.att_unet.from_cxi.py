@@ -52,9 +52,10 @@ base_channels = 8
 focal_alpha   = 1.0 * 10**(0)
 focal_gamma   = 2 * 10**(0)
 
-lr           = 10**(-3.0)
-weight_decay = 1e-4
-grad_clip    = 1.0
+lr             = 10**(-3.0)
+weight_decay   = 1e-4
+grad_clip      = 1.0
+compiles_model = False
 
 num_gpu     = 1
 size_batch  = 10 * num_gpu
@@ -209,6 +210,13 @@ if path_chkpt_prev is not None:
     ## epoch_min, loss_min = load_checkpoint(model, None, None, path_chkpt_prev)
     epoch_min += 1    # Next epoch
     logger.info(f"PREV - epoch_min = {epoch_min}, loss_min = {loss_min}")
+
+# Compile the model...
+# [CAVEAT] It does not like some interpolation methods.
+if compiles_model:
+    print("compiling the model... (takes a few minute)")
+    ## unoptimized_model = model
+    model = torch.compile(model) # requires PyTorch 2.0
 
 print(f"Current timestamp: {timestamp}")
 
