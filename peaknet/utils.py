@@ -394,3 +394,13 @@ def init_weights(module):
 
         # Set bias zero since batch norm is used...
         module.bias.data.zero_()
+
+
+
+
+class DictContainer(dict):
+    def __getattr__(self, attr):
+        return self.get(attr)
+
+    def __setattr__(self, attr, value):
+        self[attr] = value
