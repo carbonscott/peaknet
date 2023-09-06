@@ -74,14 +74,16 @@ class ResStage(nn.Module):
 class ResBlock(nn.Module):
     """
     Create X blocks for the RegNet architecture.
+
+    in_channels, bnk_channels (bottleneck channels), out_channels
     """
 
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, bnk_channels, out_channels, bnk_stride = 1, groups = 1):
         super().__init__()
 
-        self.conv1x1 = nn.Sequential(
+        self.in_conv = nn.Sequential(
             conv2d(in_channels,
-                   out_channels,
+                   bnk_channels,
                    kernel_size = 1,
                    stride      = 1,),
             nn.BatchNorm2d(num_features = out_channels,
@@ -89,3 +91,50 @@ class ResBlock(nn.Module):
                            momentum     = CONFIG.RESBLOCK.BN.MOMENTUM,),
             nn.ReLU(inplace = CONFIG.RESBLOCK.RELU_INPLACE),
         )
+
+        self.bnk_conv = nn.Sequential(
+            conv2d(bnk_channels,
+                   bnk_channels,
+                   kernel_size = 3,
+                   stride      = bnk_stride,
+                   groups      = groups),
+            nn.BatchNorm2d(num_features = out_channels,
+                           eps          = CONFIG.RESBLOCK.BN.EPS,
+                           momentum     = CONFIG.RESBLOCK.BN.MOMENTUM,),
+            nn.ReLU(inplace = CONFIG.RESBLOCK.RELU_INPLACE),
+        )
+
+        self.out_conv = nn.Sequential(
+            conv2d(bnk_channels,
+                   out_channels,
+                   kernel_size = 1,
+                   stride      = 1,),
+            nn.BatchNorm2d(num_features = in_channels,
+                           eps          = CONFIG.RESBLOCK.BN.EPS,
+                           momentum     = CONFIG.RESBLOCK.BN.MOMENTUM,),
+        )
+
+        self.res_conv = None
+        if (in_channels != out_channels) or (bnk_stride != 1):
+            self.res_conv = nn.Sequential(
+                conv2d(in_channels,
+                       out_channels,
+                       kernel_size = 1,
+                       stride      = 2,),
+                nn.BatchNorm2d(num_features = in_channels,
+                               eps          = CONFIG.RESBLOCK.BN.EPS,
+                               momentum     = CONFIG.RESBLOCK.BN.MOMENTUM,),
+            )
+
+        self.afunc = nn.ReLU(inplace = CONFIG.RESBLOCK.RELU_INPLACE),
+
+
+    def forward(self, x):
+        y = self.in_conv(x)
+        y = self.bnk_conv(y)
+        y = self.out_conv(y)
+
+        if self.res_conv is not None:
+            y = y + self.res_conv(x)
+
+        return y
