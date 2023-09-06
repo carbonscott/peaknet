@@ -16,7 +16,7 @@ def conv2d(in_channels, out_channels, kernel_size, *, stride = 1, groups = 1, bi
     return nn.Conv2d(in_channels,
                      out_channels,
                      kernel_size = kernel_size,
-                     stride      = 2,
+                     stride      = stride,
                      padding     = padding,
                      groups      = groups,
                      bias        = bias)
