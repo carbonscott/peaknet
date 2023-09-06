@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from ..config import CONFIG
 
 
-def conv2d(in_channels, out_channels, kernel_size, *, stride = 1, gropus = 1, bias = False):    # ...`*` forces the rest arguments to be keyword arguments
+def conv2d(in_channels, out_channels, kernel_size, *, stride = 1, groups = 1, bias = False):    # ...`*` forces the rest arguments to be keyword arguments
     """Helper for building a conv2d layer."""
     assert kernel_size % 2 == 1, "Only odd size kernels supported to avoid padding issues."
     padding = (kernel_size - 1)//2
@@ -18,7 +18,7 @@ def conv2d(in_channels, out_channels, kernel_size, *, stride = 1, gropus = 1, bi
                      kernel_size = kernel_size,
                      stride      = 2,
                      padding     = padding,
-                     groups      = 1,
+                     groups      = groups,
                      bias        = bias)
 
 
