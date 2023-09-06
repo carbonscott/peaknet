@@ -60,17 +60,6 @@ class ResStem(nn.Module):
 
 
 
-class ResStage(nn.Module):
-    """
-    This class implments the four stages in the RegNet architecture.
-    """
-
-    def __init__(self):
-        pass
-
-
-
-
 class ResBlock(nn.Module):
     """
     Create X blocks for the RegNet architecture.
@@ -78,7 +67,7 @@ class ResBlock(nn.Module):
     in_channels, bnk_channels (bottleneck channels), out_channels
     """
 
-    def __init__(self, in_channels, bnk_channels, out_channels, bnk_stride = 1, groups = 1):
+    def __init__(self, in_channels, out_channels, bnk_channels, bnk_stride = 1, bnk_groups = 1):
         super().__init__()
 
         self.in_conv = nn.Sequential(
@@ -97,7 +86,7 @@ class ResBlock(nn.Module):
                    bnk_channels,
                    kernel_size = 3,
                    stride      = bnk_stride,
-                   groups      = groups),
+                   groups      = bnk_groups),
             nn.BatchNorm2d(num_features = out_channels,
                            eps          = CONFIG.RESBLOCK.BN.EPS,
                            momentum     = CONFIG.RESBLOCK.BN.MOMENTUM,),
@@ -138,3 +127,32 @@ class ResBlock(nn.Module):
             y = y + self.res_conv(x)
 
         return y
+
+
+
+
+class ResStage(nn.Module):
+    """
+    This class implments the four stages in the RegNet architecture.
+
+    Block means a res block.
+    """
+
+    def __init__(self, in_channels, out_channels, num_blocks, bnk_channels, bnk_stride, bnk_groups):
+        super().__init__()
+
+        self.blocks = nn.ModuleList([
+            ResBlock(in_channels  = in_channels if block_idx == 0 else out_channels,
+                     out_channels = out_channels,
+                     bnk_channels = bnk_channels,
+                     bnk_stride   = bnk_stride  if block_idx == 0 else 1,
+                     bnk_groups   = bnk_groups)
+            for block_idx in range(num_blocks)
+        ])
+
+
+    def forward(self, x):
+        for block in self.blocks:
+            x = blocks(x)
+
+        return x
