@@ -33,6 +33,8 @@ class ResStem(nn.Module):
     - BatchNorm2d
     - Activation
     - MaxPool
+
+    Spatial dimension change: (H, W) -> (H//4, W//4)
     """
 
     def __init__(self, stem_in_channels, stem_out_channels):
