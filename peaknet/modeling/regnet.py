@@ -154,8 +154,8 @@ class ResStage(nn.Module):
                 mid_conv_groups    = mid_conv_groups,
 
                 # First block uses in_conv_stride and rest uses 1...
-                in_conv_stride     = in_conv_stride    if (not CONFIG.USES_RES_V1p5) and (block_idx == 0) else 1,
-                mid_conv_stride    = mid_conv_stride   if CONFIG.USES_RES_V1p5 and (block_idx == 0) else 1,
+                in_conv_stride     = in_conv_stride    if block_idx == 0 else 1,
+                mid_conv_stride    = mid_conv_stride   if block_idx == 0 else 1,
             )
             for block_idx in range(num_blocks)
         ])
@@ -188,16 +188,18 @@ class ResNet50(nn.Module):
         stage_in_channels  = 64
         stage_out_channels = 256
         mid_conv_channels  = stage_in_channels
-        num_stages         = 3
+        num_stages         = 1
+        num_blocks         = 3
         in_conv_stride     = 1
         mid_conv_stride    = 1
         self.layer1 = nn.ModuleList([
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
-                     num_blocks         = 3,
+                     num_blocks         = num_blocks,
                      mid_conv_channels  = mid_conv_channels,
                      mid_conv_groups    = 1,
-                     in_conv_stride     = in_conv_stride,)
+                     in_conv_stride     = in_conv_stride,
+                     mid_conv_stride    = mid_conv_stride,)
             for stage_idx in range(num_stages)
         ])
 
@@ -205,13 +207,14 @@ class ResNet50(nn.Module):
         stage_in_channels  = 256
         stage_out_channels = 512
         mid_conv_channels  = 128
-        num_stages         = 4
-        in_conv_stride     = 2
-        mid_conv_stride    = 2
+        num_stages         = 1
+        num_blocks         = 4
+        in_conv_stride     = 1 if CONFIG.USES_RES_V1p5 else 2
+        mid_conv_stride    = 2 if CONFIG.USES_RES_V1p5 else 1
         self.layer2 = nn.ModuleList([
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
-                     num_blocks         = 3,
+                     num_blocks         = num_blocks,
                      mid_conv_channels  = mid_conv_channels,
                      mid_conv_groups    = 1,
                      in_conv_stride     = in_conv_stride,
@@ -223,13 +226,14 @@ class ResNet50(nn.Module):
         stage_in_channels  = 512
         stage_out_channels = 1024
         mid_conv_channels  = 256
-        num_stages         = 6
-        in_conv_stride     = 2
-        mid_conv_stride    = 2
+        num_stages         = 1
+        num_blocks         = 6
+        in_conv_stride     = 1 if CONFIG.USES_RES_V1p5 else 2
+        mid_conv_stride    = 2 if CONFIG.USES_RES_V1p5 else 1
         self.layer3 = nn.ModuleList([
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
-                     num_blocks         = 3,
+                     num_blocks         = num_blocks,
                      mid_conv_channels  = mid_conv_channels,
                      mid_conv_groups    = 1,
                      in_conv_stride     = in_conv_stride,
@@ -241,13 +245,14 @@ class ResNet50(nn.Module):
         stage_in_channels  = 1024
         stage_out_channels = 2048
         mid_conv_channels  = 512
-        num_stages         = 3
-        in_conv_stride     = 2
-        mid_conv_stride    = 2
+        num_stages         = 1
+        num_blocks         = 3
+        in_conv_stride     = 1 if CONFIG.USES_RES_V1p5 else 2
+        mid_conv_stride    = 2 if CONFIG.USES_RES_V1p5 else 1
         self.layer4 = nn.ModuleList([
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
-                     num_blocks         = 3,
+                     num_blocks         = num_blocks,
                      mid_conv_channels  = mid_conv_channels,
                      mid_conv_groups    = 1,
                      in_conv_stride     = in_conv_stride,
