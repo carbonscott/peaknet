@@ -68,7 +68,7 @@ class ResBlock(nn.Module):
     in_channels, mid_channels (bottleneck channels), out_channels
     """
 
-    def __init__(self, block_in_channels, block_out_channels, mid_conv_channels, mid_conv_groups = 1, in_conv_stride = 1):
+    def __init__(self, block_in_channels, block_out_channels, mid_conv_channels, mid_conv_groups = 1, in_conv_stride = 1, mid_conv_stride = 1):
         super().__init__()
 
         self.in_conv = nn.Sequential(
@@ -86,7 +86,7 @@ class ResBlock(nn.Module):
             conv2d(mid_conv_channels,
                    mid_conv_channels,
                    kernel_size = 3,
-                   stride      = 1,
+                   stride      = mid_conv_stride,
                    groups      = mid_conv_groups),
             nn.BatchNorm2d(num_features = mid_conv_channels,
                            eps          = CONFIG.RESBLOCK.BN.EPS,
@@ -110,7 +110,7 @@ class ResBlock(nn.Module):
                 conv2d(block_in_channels,
                        block_out_channels,
                        kernel_size = 1,
-                       stride      = in_conv_stride,),
+                       stride      = mid_conv_stride if CONFIG.USES_RES_V1p5 else in_conv_stride,),
                 nn.BatchNorm2d(num_features = block_out_channels,
                                eps          = CONFIG.RESBLOCK.BN.EPS,
                                momentum     = CONFIG.RESBLOCK.BN.MOMENTUM,),
@@ -141,7 +141,7 @@ class ResStage(nn.Module):
     Block means a res block.
     """
 
-    def __init__(self, stage_in_channels, stage_out_channels, num_blocks, mid_conv_channels, mid_conv_groups, in_conv_stride):
+    def __init__(self, stage_in_channels, stage_out_channels, num_blocks, mid_conv_channels, mid_conv_groups, in_conv_stride = 1, mid_conv_stride = 1):
         super().__init__()
 
         self.blocks = nn.ModuleList([
@@ -154,7 +154,8 @@ class ResStage(nn.Module):
                 mid_conv_groups    = mid_conv_groups,
 
                 # First block uses in_conv_stride and rest uses 1...
-                in_conv_stride     = in_conv_stride  if block_idx == 0 else 1,
+                in_conv_stride     = in_conv_stride    if (not CONFIG.USES_RES_V1p5) and (block_idx == 0) else 1,
+                mid_conv_stride    = mid_conv_stride   if CONFIG.USES_RES_V1p5 and (block_idx == 0) else 1,
             )
             for block_idx in range(num_blocks)
         ])
@@ -180,18 +181,77 @@ class ResNet50(nn.Module):
     def __init__(self):
         super().__init__()
 
+        # [[[ STEM ]]]
         self.stem = ResStem(stem_in_channels = 1, stem_out_channels = 64)
 
+        # [[[ Layer 1 ]]]
         stage_in_channels  = 64
         stage_out_channels = 256
+        mid_conv_channels  = stage_in_channels
         num_stages         = 3
+        in_conv_stride     = 1
+        mid_conv_stride    = 1
         self.layer1 = nn.ModuleList([
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
                      num_blocks         = 3,
-                     mid_conv_channels  = 64,
+                     mid_conv_channels  = mid_conv_channels,
                      mid_conv_groups    = 1,
-                     in_conv_stride     = 1,)
+                     in_conv_stride     = in_conv_stride,)
+            for stage_idx in range(num_stages)
+        ])
+
+        # [[[ Layer 2 ]]]
+        stage_in_channels  = 256
+        stage_out_channels = 512
+        mid_conv_channels  = 128
+        num_stages         = 4
+        in_conv_stride     = 2
+        mid_conv_stride    = 2
+        self.layer2 = nn.ModuleList([
+            ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
+                     stage_out_channels = stage_out_channels,
+                     num_blocks         = 3,
+                     mid_conv_channels  = mid_conv_channels,
+                     mid_conv_groups    = 1,
+                     in_conv_stride     = in_conv_stride,
+                     mid_conv_stride    = mid_conv_stride,)
+            for stage_idx in range(num_stages)
+        ])
+
+        # [[[ Layer 3 ]]]
+        stage_in_channels  = 512
+        stage_out_channels = 1024
+        mid_conv_channels  = 256
+        num_stages         = 6
+        in_conv_stride     = 2
+        mid_conv_stride    = 2
+        self.layer3 = nn.ModuleList([
+            ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
+                     stage_out_channels = stage_out_channels,
+                     num_blocks         = 3,
+                     mid_conv_channels  = mid_conv_channels,
+                     mid_conv_groups    = 1,
+                     in_conv_stride     = in_conv_stride,
+                     mid_conv_stride    = mid_conv_stride,)
+            for stage_idx in range(num_stages)
+        ])
+
+        # [[[ Layer 4 ]]]
+        stage_in_channels  = 1024
+        stage_out_channels = 2048
+        mid_conv_channels  = 512
+        num_stages         = 3
+        in_conv_stride     = 2
+        mid_conv_stride    = 2
+        self.layer4 = nn.ModuleList([
+            ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
+                     stage_out_channels = stage_out_channels,
+                     num_blocks         = 3,
+                     mid_conv_channels  = mid_conv_channels,
+                     mid_conv_groups    = 1,
+                     in_conv_stride     = in_conv_stride,
+                     mid_conv_stride    = mid_conv_stride,)
             for stage_idx in range(num_stages)
         ])
 
@@ -199,7 +259,9 @@ class ResNet50(nn.Module):
     def forward(self, x):
         x = self.stem(x)
 
-        for layer in self.layer1:
-            x = layer(x)
+        for layer in self.layer1: x = layer(x)
+        for layer in self.layer2: x = layer(x)
+        for layer in self.layer3: x = layer(x)
+        for layer in self.layer4: x = layer(x)
 
         return x

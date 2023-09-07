@@ -10,3 +10,5 @@ with CONFIG.enable_auto_create():
     CONFIG.RESBLOCK.BN.EPS       = 1e-5
     CONFIG.RESBLOCK.BN.MOMENTUM  = 1e-1
     CONFIG.RESBLOCK.RELU_INPLACE = True
+
+CONFIG.USES_RES_V1p5 = True
