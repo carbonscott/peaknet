@@ -38,7 +38,6 @@ class ResStem(nn.Module):
     def __init__(self, stem_in_channels, stem_out_channels):
         super().__init__()
 
-        print(CONFIG.RESSTEM.BN.EPS)
         self.conv = conv2d(stem_in_channels,
                            stem_out_channels,
                            kernel_size = 7,
@@ -145,7 +144,7 @@ class ResStage(nn.Module):
 
         self.blocks = nn.ModuleList([
             ResBlock(
-                # First block uses stage_in_channel and rest uses prev stage_out_channels...
+                # First block uses stage_in_channels and rest uses prev stage_out_channels...
                 block_in_channels  = stage_in_channels if block_idx == 0 else stage_out_channels,
 
                 block_out_channels = stage_out_channels,
@@ -181,9 +180,24 @@ class ResNet50(nn.Module):
 
         self.stem = ResStem(stem_in_channels = 1, stem_out_channels = 64)
 
-        self.stage1 = ResStage(stage_in_channels  = 64,
-                               stage_out_channels = 256,
-                               num_blocks         = 3,
-                               mid_conv_channels  = 64,
-                               mid_conv_groups    = 1,
-                               in_conv_stride     = 1,)
+        stage_in_channels  = 64
+        stage_out_channels = 256
+        num_stages         = 3
+        self.layer1 = nn.ModuleList([
+            ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
+                     stage_out_channels = stage_out_channels,
+                     num_blocks         = 3,
+                     mid_conv_channels  = 64,
+                     mid_conv_groups    = 1,
+                     in_conv_stride     = 1,)
+            for stage_idx in range(num_stages)
+        ])
+
+
+    def forward(self, x):
+        x = self.stem(x)
+
+        for layer in self.layer1:
+            x = layer(x)
+
+        return x
