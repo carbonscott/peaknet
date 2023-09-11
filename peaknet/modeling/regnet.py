@@ -144,7 +144,8 @@ class ResStage(nn.Module):
     def __init__(self, stage_in_channels, stage_out_channels, num_blocks, mid_conv_channels, mid_conv_groups, in_conv_stride = 1, mid_conv_stride = 1):
         super().__init__()
 
-        self.blocks = nn.ModuleList([
+        # Process all blocks sequentially...
+        self.blocks = nn.Sequential(*[
             ResBlock(
                 # First block uses stage_in_channels and rest uses prev stage_out_channels...
                 block_in_channels  = stage_in_channels if block_idx == 0 else stage_out_channels,
@@ -162,8 +163,7 @@ class ResStage(nn.Module):
 
 
     def forward(self, x):
-        for block in self.blocks:
-            x = block(x)
+        x = self.blocks(x)
 
         return x
 
@@ -176,6 +176,9 @@ class ResNet50(nn.Module):
     nomenclature.
 
     ResNet50 architecture reference: [NEED URL]
+
+    ResStage(s) are kept in nn.Sequential but not nn.ModuleList since they will
+    be processed sequentially.
     """
 
     def __init__(self):
@@ -192,7 +195,7 @@ class ResNet50(nn.Module):
         num_blocks         = 3
         in_conv_stride     = 1
         mid_conv_stride    = 1
-        self.layer1 = nn.ModuleList([
+        self.layer1 = nn.Sequential(*[
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
                      num_blocks         = num_blocks,
@@ -211,7 +214,7 @@ class ResNet50(nn.Module):
         num_blocks         = 4
         in_conv_stride     = 1 if CONFIG.USES_RES_V1p5 else 2
         mid_conv_stride    = 2 if CONFIG.USES_RES_V1p5 else 1
-        self.layer2 = nn.ModuleList([
+        self.layer2 = nn.Sequential(*[
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
                      num_blocks         = num_blocks,
@@ -230,7 +233,7 @@ class ResNet50(nn.Module):
         num_blocks         = 6
         in_conv_stride     = 1 if CONFIG.USES_RES_V1p5 else 2
         mid_conv_stride    = 2 if CONFIG.USES_RES_V1p5 else 1
-        self.layer3 = nn.ModuleList([
+        self.layer3 = nn.Sequential(*[
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
                      num_blocks         = num_blocks,
@@ -249,7 +252,7 @@ class ResNet50(nn.Module):
         num_blocks         = 3
         in_conv_stride     = 1 if CONFIG.USES_RES_V1p5 else 2
         mid_conv_stride    = 2 if CONFIG.USES_RES_V1p5 else 1
-        self.layer4 = nn.ModuleList([
+        self.layer4 = nn.Sequential(*[
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
                      num_blocks         = num_blocks,
@@ -263,10 +266,9 @@ class ResNet50(nn.Module):
 
     def forward(self, x):
         x = self.stem(x)
-
-        for layer in self.layer1: x = layer(x)
-        for layer in self.layer2: x = layer(x)
-        for layer in self.layer3: x = layer(x)
-        for layer in self.layer4: x = layer(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
 
         return x
