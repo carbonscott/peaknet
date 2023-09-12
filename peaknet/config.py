@@ -21,3 +21,22 @@ with CONFIG.enable_auto_create():
     CONFIG.BIFPN.UP_SCALE_FACTOR   = 2
     CONFIG.BIFPN.FUSION.EPS        = 1e-5
 
+with CONFIG.enable_auto_create():
+    CONFIG.RES_ATT_UNET.CHANNELS = {
+        "fusion layers" : (
+            (2048, 1024),
+            (1024, 512 ),
+            (512,  256 ),
+            (256,  64  ),
+        ),
+        "head_segmask_layer" : (64, 3),
+    }
+
+with CONFIG.enable_auto_create():
+    CONFIG.RESNET_ENCODER.SAVES_LAYER = {
+        "stem"   : True,
+        "layer1" : True,
+        "layer2" : True,
+        "layer3" : True,
+        "layer4" : True,
+    }
