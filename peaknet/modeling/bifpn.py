@@ -121,8 +121,8 @@ class BiFPNBlock(nn.Module):
         self.conv.update(q_conv)
 
         # Define the weights used in fusion
-        num_level_stage_m = max_level - 1 - min_level
-        num_level_stage_q = num_fusion_layer_in_stage_m
+        num_level_stage_m = max_level - min_level
+        num_level_stage_q = num_level_stage_m
         self.w_m = nn.Parameter(torch.randn(num_level_stage_m, 2))    # Two-component fusion at stage M
         self.w_q = nn.Parameter(torch.randn(num_level_stage_q, 3))    # Three-component fusion at stage Q
 
@@ -168,9 +168,9 @@ class BiFPNBlock(nn.Module):
         q = {}
         for idx, level_high in enumerate(range(min_level, max_level)):
             level_low = level_high + 1
-            q_high = m[level_high] if idx == 0             else q[level_high]
-            m_low  = m[level_low]  if idx < num_levels - 1 else q[level_low ]
-            p_low  = p[level_low]
+            q_high = m[level_high] if idx == 0              else q[level_high]
+            m_low  = m[level_low ] if level_low < max_level else p[level_low ]
+            p_low  = p[level_low ]
 
             w1, w2, w3 = self.w_q[idx]
             q_high_up = F.interpolate(q_high,
@@ -181,9 +181,10 @@ class BiFPNBlock(nn.Module):
             q_fused /= (w1 + w2 + w3 + CONFIG.BIFPN.FUSION.EPS)
             q_fused  = self.conv[f"q{level_low}"](q_fused)
 
+            if idx == 0: q[level_high] = q_high
             q[level_low] = q_fused
 
-        return [ q[level] for level in range(min_level, max_level) ]
+        return [ q[level] for level in range(min_level, min_level + num_levels) ]
 
 
 
