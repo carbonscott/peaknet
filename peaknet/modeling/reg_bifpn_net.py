@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from ..config import CONFIG
 
 from .resnet_encoder import ImageEncoder
-from .bifpn          import BiFPN
+from .bifpn          import BiFPN, DepthwiseSeparableConv2d
 
 
 class PeakNet(nn.Module):
@@ -18,7 +18,7 @@ class PeakNet(nn.Module):
 
         # Create the adapter layer between encoder and bifpn...
         self.bifpn_adapter = nn.ModuleList([
-            nn.Conv2d(in_channels  = in_channels,
+            DepthwiseSeparableConv2d(in_channels  = in_channels,
                       out_channels = num_features,
                       kernel_size  = 1,
                       stride       = 1,
