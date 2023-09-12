@@ -145,6 +145,7 @@ class BiFPNBlock(nn.Module):
         p = { level : x[idx] for idx, level in enumerate(range(min_level, min_level + num_levels)) }
 
         # ___/ Stage M \___
+        # Fuse features from low resolution to high resolution (pathway M)...
         m = {}
         for idx, level_low in enumerate(range(max_level, min_level, -1)):
             level_high = level_low - 1
@@ -163,6 +164,7 @@ class BiFPNBlock(nn.Module):
             m[level_high] = m_fused
 
         # ___/ Stage Q \___
+        # Fuse features from high resolution to low resolution (pathway Q)...
         q = {}
         for idx, level_high in enumerate(range(min_level, max_level)):
             level_low = level_high + 1
