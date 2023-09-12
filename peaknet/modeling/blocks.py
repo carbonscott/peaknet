@@ -24,6 +24,8 @@ def conv2d(in_channels, out_channels, kernel_size, *, stride = 1, groups = 1, bi
                      bias        = bias)
 
 
+
+
 def pool2d(kernel_size, *, stride = 2):    # ...`*` forces the rest arguments to be keyword arguments
     """Helper for building a pool2d layer."""
     assert kernel_size % 2 == 1, "Only odd size kernels supported to avoid padding issues."
