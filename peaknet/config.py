@@ -40,3 +40,21 @@ with CONFIG.enable_auto_create():
         "layer3" : True,
         "layer4" : True,
     }
+
+    CONFIG.RESNET_ENCODER.OUTPUT_CHANNELS = {
+        "stem"   : 64,
+        "layer1" : 256,
+        "layer2" : 512,
+        "layer3" : 1024,
+        "layer4" : 2048,
+    }
+
+    CONFIG.SEG_HEAD.UP_SCALE_FACTOR = [
+        2,  # stem
+        4,  # layer1
+        8,  # layer2
+        16, # layer3
+        32, # layer4
+    ]
+
+    CONFIG.SEG_HEAD.CHANNELS = (64 * 5, 3)
