@@ -49,7 +49,6 @@ class ResStem(nn.Module):
                                    momentum     = CONFIG.RESSTEM.BN.MOMENTUM,)
 
         self.relu = nn.ReLU(inplace = CONFIG.RESSTEM.RELU_INPLACE)
-        self.pool = pool2d(kernel_size = 3, stride = 2)
 
 
     def forward(self, x):
@@ -195,16 +194,17 @@ class ResNet50(nn.Module):
         num_blocks         = 3
         in_conv_stride     = 1
         mid_conv_stride    = 1
-        self.layer1 = nn.Sequential(*[
-            ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
-                     stage_out_channels = stage_out_channels,
-                     num_blocks         = num_blocks,
-                     mid_conv_channels  = mid_conv_channels,
-                     mid_conv_groups    = 1,
-                     in_conv_stride     = in_conv_stride,
-                     mid_conv_stride    = mid_conv_stride,)
-            for stage_idx in range(num_stages)
-        ])
+        self.layer1 = nn.Sequential(
+            pool2d(kernel_size = 3, stride = 2),    # ...Original ResNet likes to have a pool in the first layer
+            *[ ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
+                        stage_out_channels = stage_out_channels,
+                        num_blocks         = num_blocks,
+                        mid_conv_channels  = mid_conv_channels,
+                        mid_conv_groups    = 1,
+                        in_conv_stride     = in_conv_stride,
+                        mid_conv_stride    = mid_conv_stride,)
+            for stage_idx in range(num_stages) ]
+        )
 
         # [[[ Layer 2 ]]]
         stage_in_channels  = 256
