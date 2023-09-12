@@ -189,6 +189,26 @@ class BiFPNBlock(nn.Module):
 
 
 
+class BiFPN(nn.Module):
+    """
+    This class provides a series of BiFPN blocks.
+    """
+
+    def __init__(self, num_blocks = 1, num_features = 64, num_levels = 5):
+        super().__init__()
+
+        self.blocks = nn.Sequential(*[
+            BiFPNBlock(num_features = num_features,
+                       num_levels = num_levels)
+            for block_idx in range(num_blocks)
+        ])
+
+
+    def forward(self, x):
+        return self.blocks(x)
+
+
+
 
 #####################################################################
 # RAW BIFPN IMPLEMENTATION BELOW IS FOR LEARNING/DEBUGGING PURPOSES #
