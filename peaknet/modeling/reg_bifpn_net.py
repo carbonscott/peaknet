@@ -19,10 +19,10 @@ class PeakNet(nn.Module):
         # Create the adapter layer between encoder and bifpn...
         self.bifpn_adapter = nn.ModuleList([
             DepthwiseSeparableConv2d(in_channels  = in_channels,
-                      out_channels = num_features,
-                      kernel_size  = 1,
-                      stride       = 1,
-                      padding      = 0)
+                                     out_channels = num_features,
+                                     kernel_size  = 1,
+                                     stride       = 1,
+                                     padding      = 0)
             for _, in_channels in CONFIG.RESNET_ENCODER.OUTPUT_CHANNELS.items()
         ])
 
