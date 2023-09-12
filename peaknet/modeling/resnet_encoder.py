@@ -24,7 +24,10 @@ class ImageEncoder(nn.Module):
         # Going through the immediate layers and collect feature maps...
         for name, encoder_layer in self.encoder.named_children():
             x = encoder_layer(x)
-            if saves_feature_per_layer: fmap_in_layers.append(x)
+
+            # Save fmap from all layers except these excluded...
+            if saves_feature_per_layer and CONFIG.RESNET_ENCODER.SAVES_LAYER[name]:
+                fmap_in_layers.append(x)
 
         ret = fmap_in_layers if saves_feature_per_layer else x
         return ret
