@@ -17,7 +17,7 @@ class PeakNet(nn.Module):
         self.image_encoder = ImageEncoder(saves_feature_per_layer = True)
 
         # Create the adapter layer between encoder and bifpn...
-        self.bifpn_adapter = nn.ModuleList([
+        self.encoder_to_bifpn = nn.ModuleList([
             DepthwiseSeparableConv2d(in_channels  = in_channels,
                                      out_channels = num_features,
                                      kernel_size  = 1,
@@ -46,17 +46,17 @@ class PeakNet(nn.Module):
         fmap_in_encoder_layers = self.image_encoder(x)
 
         # Apply the BiFPN adapter...
-        bifpn_input = []
+        bifpn_input_list = []
         for idx, fmap in enumerate(fmap_in_encoder_layers):
-            fmap_bifpn = self.bifpn_adapter[idx](fmap)
-            bifpn_input.append(fmap_bifpn)
+            bifpn_input = self.encoder_to_bifpn[idx](fmap)
+            bifpn_input_list.append(bifpn_input)
 
         # Apply the BiFPN layer...
-        bifpn_output = self.bifpn(bifpn_input)
+        bifpn_output_list = self.bifpn(bifpn_input_list)
 
         # Upsample all bifpn output from high res to low res...
         fmap_upscale_list = []
-        for idx, fmap in enumerate(bifpn_output):
+        for idx, fmap in enumerate(bifpn_output_list):
             scale_factor = CONFIG.SEG_HEAD.UP_SCALE_FACTOR[idx]
             fmap_upscale = F.interpolate(fmap,
                                          scale_factor  = scale_factor,
