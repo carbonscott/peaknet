@@ -57,4 +57,10 @@ with CONFIG.enable_auto_create():
         32, # layer4
     ]
 
-    CONFIG.SEG_HEAD.CHANNELS = (64 * 5, 3)
+    CONFIG.SEG_HEAD.Q3_UP_SCALE_FACTOR = 2
+
+    CONFIG.SEG_HEAD.Q3_IN_CHANNELS   = 64
+    CONFIG.SEG_HEAD.FUSE_IN_CHANNELS = 64 * 5
+    CONFIG.SEG_HEAD.OUT_CHANNELS     = 3
+
+    CONFIG.SEG_HEAD.USES_Q3 = True
