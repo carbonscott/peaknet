@@ -6,6 +6,7 @@ import sys
 import logging
 import socket
 import tqdm
+import signal
 import numpy as np
 
 import torch
@@ -15,7 +16,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # Libraries used for Distributed Data Parallel (DDP)
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed import init_process_group, destroy_process_group, all_gather, broadcast
+import torch.distributed as dist
 
 from peaknet.datasets.SFX           import SFXMulticlassDataset
 from peaknet.modeling.reg_bifpn_net import PeakNet
@@ -34,16 +35,29 @@ torch.autograd.set_detect_anomaly(True)
 
 logger = logging.getLogger(__name__)
 
+
+# [[[ ERROR HANDLING ]]]
+def signal_handler(signal, frame):
+    # Emit Ctrl+C like signal which is then caught by our try/except block
+    raise KeyboardInterrupt
+
+# Register the signal handler
+signal.signal(signal.SIGINT,  signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
+
 # [[[ CONFIG ]]]
 with CONFIG.enable_auto_create():
-    CONFIG.DDP.BACKEND = 'nccl'
+    CONFIG.DDP.BACKEND          = 'nccl'
+    CONFIG.DDP.NUM_GPU_PER_NODE = 2
 
 # [[[ DDP INIT ]]]
 # Initialize distributed environment
-init_process_group(backend=CONFIG.DDP.BACKEND, init_method="env://")
-ddp_rank       = int(os.environ["RANK"])
+ddp_rank       = int(os.environ["RANK"      ])
 ddp_local_rank = int(os.environ["LOCAL_RANK"])
 ddp_world_size = int(os.environ["WORLD_SIZE"])
+dist.init_process_group(backend=CONFIG.DDP.BACKEND, rank = ddp_rank, world_size = ddp_world_size, init_method = "env://")
+print(f"RANK:{ddp_rank},LOCAL_RANK:{ddp_local_rank},WORLD_SIZE:{ddp_world_size}")
 
 # Set up GPU device
 device = f'cuda:{ddp_local_rank}'
@@ -64,12 +78,11 @@ drc_dataset  = 'datasets'
 fl_dataset   = 'mfx13016_0028_N68+mfxp22820_0013_N37+mfx13016_0028_N63_low_photon.68v37v30.data.label_corrected.npy'       # size_sample = 3000
 path_dataset = os.path.join(drc_dataset, fl_dataset)
 
-size_sample   = 3000
+size_sample   = 300
 frac_train    = 0.8
 frac_validate = 1.0
 dataset_usage = 'train'
 
-uses_skip_connection = True    # Default: True
 uses_mixed_precision = True
 
 base_channels = 8
@@ -79,9 +92,8 @@ focal_gamma   = 2 * 10**(0)
 lr           = 3e-4
 weight_decay = 1e-4
 
-num_gpu     = 2
-size_batch  = 5              # per GPU
-num_workers = 5 * num_gpu    # mutiple of size_sample // size_batch
+size_batch  = 5                                  # per GPU
+num_workers = 5 * CONFIG.DDP.NUM_GPU_PER_NODE    # mutiple of size_sample // size_batch
 seed        = 0
 seed       += seed_offset
 
@@ -97,13 +109,12 @@ if ddp_rank == 0:
                 Fraction    (train)    : {frac_train}
                 Dataset size           : {size_sample}
                 Batch  size (per GPU)  : {size_batch}
-                Number of GPUs         : {num_gpu}
+                Number of GPUs         : {CONFIG.DDP.NUM_GPU_PER_NODE}
                 lr                     : {lr}
                 weight_decay           : {weight_decay}
                 base_channels          : {base_channels}
                 focal_alpha            : {focal_alpha}
                 focal_gamma            : {focal_gamma}
-                uses_skip_connection   : {uses_skip_connection}
                 uses_mixed_precision   : {uses_mixed_precision}
                 num_workers            : {num_workers}
                 continued training???  : from {fl_chkpt_prev}
@@ -172,7 +183,8 @@ dataloader_validate = torch.utils.data.DataLoader( dataset_validate,
 # [[[ MODEL ]]]
 # Use the model architecture -- attention u-net...
 model = PeakNet(num_blocks = 1, num_features = 64)
-print(f"{sum(p.numel() for p in model.parameters())/1e6} M pamameters.")
+if ddp_rank == 0:
+    print(f"{sum(p.numel() for p in model.parameters())/1e6} M pamameters.")
 
 # Use pretrained weights...
 path_chkpt = os.path.join("pretrained_chkpts", "transfered_weights.resnet50.chkpt")
@@ -180,10 +192,8 @@ chkpt      = torch.load(path_chkpt)
 model.backbone.encoder.load_state_dict(chkpt, strict = False)
 
 # Move model to gpu(s)...
-# [IMPROVE] Replace the following with ddp
-## if torch.cuda.device_count() > 1:
-##    model = nn.DataParallel(model)
 model.to(device)
+model.float()
 model = DDP(model, device_ids = [ddp_local_rank], find_unused_parameters=True)
 
 
@@ -218,98 +228,33 @@ if path_chkpt_prev is not None:
 if ddp_rank == 0:
     print(f"Current timestamp: {timestamp}")
 
-chkpt_saving_period = 1
-epoch_unstable_end  = -1
-for epoch in tqdm.tqdm(range(max_epochs)):
-    epoch += epoch_min
+try:
+    chkpt_saving_period = 1
+    epoch_unstable_end  = -1
+    for epoch in tqdm.tqdm(range(max_epochs)):
+        epoch += epoch_min
 
-    # Shuffle the training examples...
-    sampler_train.set_epoch(epoch)
+        # Shuffle the training examples...
+        sampler_train.set_epoch(epoch)
 
-    # Uses mixed precision???
-    if uses_mixed_precision: scaler = torch.cuda.amp.GradScaler()
+        # Uses mixed precision???
+        if uses_mixed_precision: scaler = torch.cuda.amp.GradScaler()
 
-    # ___/ TRAIN \___
-    # Turn on training related components in the model...
-    model.train()
+        # ___/ TRAIN \___
+        # Turn on training related components in the model...
+        model.train()
 
-    # Fetch batches...
-    local_train_loss    = 0.0
-    local_train_samples = 0
-    batch_train = tqdm.tqdm(enumerate(dataloader_train), total = len(dataloader_train))
-    for batch_idx, batch_entry in batch_train:
-        # Unpack the batch entry and move them to device...
-        batch_input, batch_target = batch_entry
-        batch_input  = batch_input.to(device, dtype = torch.float)
-        batch_target = batch_target.to(device, dtype = torch.float)
+        # Fetch batches...
+        local_train_loss    = 0.0
+        local_train_samples = 0.0
+        batch_train = tqdm.tqdm(enumerate(dataloader_train), total = len(dataloader_train))
+        for batch_idx, batch_entry in batch_train:
+            # Unpack the batch entry and move them to device...
+            batch_input, batch_target = batch_entry
+            batch_input  = batch_input.to(device, dtype = torch.float)
+            batch_target = batch_target.to(device, dtype = torch.float)
 
-        # Forward, backward and update...
-        if uses_mixed_precision:
-            with torch.cuda.amp.autocast(dtype = torch.float16):
-                # Forward pass...
-                batch_output = model(batch_input)
-
-                # Crop the target mask as u-net might change the output dimension...
-                size_y, size_x = batch_output.shape[-2:]
-                batch_target_crop = center_crop(batch_target, size_y, size_x)
-
-                # Calculate the loss...
-                loss = criterion(batch_output, batch_target_crop)
-                loss = loss.mean()
-
-            # Backward pass and optimization...
-            optimizer.zero_grad()
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            # Forward pass...
-            batch_output = model(batch_input)
-
-            # Crop the target mask as u-net might change the output dimension...
-            size_y, size_x = batch_output.shape[-2:]
-            batch_target_crop = center_crop(batch_target, size_y, size_x)
-
-            # Calculate the loss...
-            loss = criterion(batch_output, batch_target_crop)
-            loss = loss.mean()
-
-            # Backward pass and optimization...
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-        local_num_samples    = len(batch_input)
-        local_train_loss    += loss.item() * local_num_samples
-        local_train_samples += local_num_samples
-
-    # Gather training metrics
-    train_losses_list  = [torch.tensor(0.0).to(device) for _ in range(ddp_world_size)]
-    train_samples_list = [torch.tensor(0.0).to(device) for _ in range(ddp_world_size)]
-
-    dist.all_gather(train_losses_list,  torch.tensor(local_train_loss   ).to(device))
-    dist.all_gather(train_samples_list, torch.tensor(local_train_samples).to(device))
-
-    if ddp_rank == 0:
-        train_loss_mean = sum(train_losses_list) / sum(train_samples_list)
-        logger.info(f"MSG (device:{device}) - epoch {epoch}, mean train loss = {train_loss_mean:.8f}")
-
-
-    # ___/ VALIDATE \___
-    model.eval()
-
-    # Fetch batches...
-    local_validate_loss    = 0.0
-    local_validate_samples = 0
-    batch_validate = tqdm.tqdm(enumerate(dataloader_validate), total = len(dataloader_validate))
-    for batch_idx, batch_entry in batch_validate:
-        # Unpack the batch entry and move them to device...
-        batch_input, batch_target = batch_entry
-        batch_input  = batch_input.to(device, dtype = torch.float)
-        batch_target = batch_target.to(device, dtype = torch.float)
-
-        # Forward only...
-        with torch.no_grad():
+            # Forward, backward and update...
             if uses_mixed_precision:
                 with torch.cuda.amp.autocast(dtype = torch.float16):
                     # Forward pass...
@@ -322,11 +267,17 @@ for epoch in tqdm.tqdm(range(max_epochs)):
                     # Calculate the loss...
                     loss = criterion(batch_output, batch_target_crop)
                     loss = loss.mean()
+
+                # Backward pass and optimization...
+                optimizer.zero_grad()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
             else:
                 # Forward pass...
                 batch_output = model(batch_input)
 
-                # Crop the target mask as u-net might change the output dimension...
+                # Crop the target mask even if the output dimension size is changed...
                 size_y, size_x = batch_output.shape[-2:]
                 batch_target_crop = center_crop(batch_target, size_y, size_x)
 
@@ -334,39 +285,110 @@ for epoch in tqdm.tqdm(range(max_epochs)):
                 loss = criterion(batch_output, batch_target_crop)
                 loss = loss.mean()
 
-        local_num_samples       = len(batch_input)
-        local_validate_loss    += loss.item() * local_num_samples
-        local_validate_samples += local_num_samples
+                # Backward pass and optimization...
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-    # Gather training metrics
-    validate_losses_list  = [torch.tensor(0.0).to(device) for _ in range(ddp_world_size)]
-    validate_samples_list = [torch.tensor(0.0).to(device) for _ in range(ddp_world_size)]
+            local_num_samples    = len(batch_input)
+            local_train_loss    += loss.item() * local_num_samples
+            local_train_samples += local_num_samples
 
-    dist.all_gather(validate_losses_list,  torch.tensor(local_validate_loss   ).to(device))
-    dist.all_gather(validate_samples_list, torch.tensor(local_validate_samples).to(device))
+        # Gather training metrics
+        train_losses_list  = [torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size)]
+        train_samples_list = [torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size)]
 
-    if ddp_rank == 0:
-        validate_loss_mean = sum(validate_losses_list) / sum(validate_samples_list)
-        logger.info(f"MSG (device:{device}) - epoch {epoch}, mean train loss = {validate_loss_mean:.8f}")
+        dist.all_gather(train_losses_list,  torch.tensor(local_train_loss   ).to(device).float())
+        dist.all_gather(train_samples_list, torch.tensor(local_train_samples).to(device).float())
 
-        # Report the learning rate used in the last optimization...
-        lr_used = optimizer.param_groups[0]['lr']
-        logger.info(f"MSG (device:{device}) - epoch {epoch}, lr used = {lr_used}")
-    else:
-        validate_loss_mean = torch.tensor(0.0).to(device)
-
-    # Update learning rate in the scheduler...
-    broadcast(validate_loss_mean, src = 0)
-    scheduler.step(validate_loss_mean)
+        if ddp_rank == 0:
+            train_loss_mean = sum(train_losses_list) / sum(train_samples_list)
+            logger.info(f"MSG (device:{device}) - epoch {epoch}, mean train loss = {train_loss_mean:.8f}")
 
 
-    # ___/ SAVE CHECKPOINT??? \___
-    if ddp_rank == 0:
-        if validate_loss_mean < loss_min:
-            loss_min = validate_loss_mean
+        # ___/ VALIDATE \___
+        model.eval()
 
-            if (epoch % chkpt_saving_period == 0) or (epoch > epoch_unstable_end):
-                fl_chkpt   = f"{timestamp}.epoch_{epoch}.chkpt"
-                path_chkpt = os.path.join(drc_chkpt, fl_chkpt)
-                save_checkpoint(model, optimizer, scheduler, epoch, loss_min, path_chkpt)
-                logger.info(f"MSG (device:{device}) - save {path_chkpt}")
+        # Fetch batches...
+        local_validate_loss    = 0.0
+        local_validate_samples = 0.0
+        batch_validate = tqdm.tqdm(enumerate(dataloader_validate), total = len(dataloader_validate))
+        for batch_idx, batch_entry in batch_validate:
+            # Unpack the batch entry and move them to device...
+            batch_input, batch_target = batch_entry
+            batch_input  = batch_input.to(device, dtype = torch.float)
+            batch_target = batch_target.to(device, dtype = torch.float)
+
+            # Forward only...
+            with torch.no_grad():
+                if uses_mixed_precision:
+                    with torch.cuda.amp.autocast(dtype = torch.float16):
+                        # Forward pass...
+                        batch_output = model(batch_input)
+
+                        # Crop the target mask as u-net might change the output dimension...
+                        size_y, size_x = batch_output.shape[-2:]
+                        batch_target_crop = center_crop(batch_target, size_y, size_x)
+
+                        # Calculate the loss...
+                        loss = criterion(batch_output, batch_target_crop)
+                        loss = loss.mean()
+                else:
+                    # Forward pass...
+                    batch_output = model(batch_input)
+
+                    # Crop the target mask as u-net might change the output dimension...
+                    size_y, size_x = batch_output.shape[-2:]
+                    batch_target_crop = center_crop(batch_target, size_y, size_x)
+
+                    # Calculate the loss...
+                    loss = criterion(batch_output, batch_target_crop)
+                    loss = loss.mean()
+
+            local_num_samples       = len(batch_input)
+            local_validate_loss    += loss.item() * local_num_samples
+            local_validate_samples += local_num_samples
+
+        # Gather training metrics
+        validate_losses_list  = [torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size)]
+        validate_samples_list = [torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size)]
+
+        dist.all_gather(validate_losses_list,  torch.tensor(local_validate_loss   ).to(device).float())
+        dist.all_gather(validate_samples_list, torch.tensor(local_validate_samples).to(device).float())
+
+        if ddp_rank == 0:
+            validate_loss_mean = sum(validate_losses_list) / sum(validate_samples_list)
+            logger.info(f"MSG (device:{device}) - epoch {epoch}, mean train loss = {validate_loss_mean:.8f}")
+
+            # Report the learning rate used in the last optimization...
+            lr_used = optimizer.param_groups[0]['lr']
+            logger.info(f"MSG (device:{device}) - epoch {epoch}, lr used = {lr_used}")
+        else:
+            validate_loss_mean = torch.tensor(0.0).to(device)
+
+        # Update learning rate in the scheduler...
+        dist.broadcast(validate_loss_mean, src = 0)
+        scheduler.step(validate_loss_mean)
+
+
+        # ___/ SAVE CHECKPOINT??? \___
+        if ddp_rank == 0:
+            if validate_loss_mean < loss_min:
+                loss_min = validate_loss_mean
+
+                if (epoch % chkpt_saving_period == 0) or (epoch > epoch_unstable_end):
+                    fl_chkpt   = f"{timestamp}.epoch_{epoch}.chkpt"
+                    path_chkpt = os.path.join(drc_chkpt, fl_chkpt)
+                    save_checkpoint(model, optimizer, scheduler, epoch, loss_min, path_chkpt)
+                    logger.info(f"MSG (device:{device}) - save {path_chkpt}")
+
+        dist.barrier()
+
+except KeyboardInterrupt:
+    print(f"DDP RANK {ddp_rank}: Training was interrupted!")
+except Exception as e:
+    print(f"DDP RANK {ddp_rank}: Error occurred: {e}")
+finally:
+    # Ensure that the process group is always destroyed
+    if dist.is_initialized():
+        dist.destroy_process_group()

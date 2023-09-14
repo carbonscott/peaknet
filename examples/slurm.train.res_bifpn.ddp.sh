@@ -8,12 +8,12 @@
 #SBATCH --time 00:29:00         # Regular only allows a max of 12 hours.  See https://docs.nersc.gov/jobs/policy/
 #!SBATCH --qos=regular            # See details: https://docs.nersc.gov/policies/resource-usage/#intended-purpose-of-available-qoss
 #!SBATCH --time 12:00:00          # Regular only allows a max of 12 hours.  See https://docs.nersc.gov/jobs/policy/
-#SBATCH --gres=gpu:1            # GPU resources requested: 1x A100.
-#SBATCH --nodes=2                # Number of nodes
-#SBATCH --ntasks-per-node 1      # Numebr of tasks (e.g. train.py)
+#SBATCH --gres=gpu:2            # GPU resources requested: 1x A100.
+#SBATCH --nodes=1                # Number of nodes
+#SBATCH --ntasks-per-node 2      # Numebr of tasks (e.g. train.py)
 #SBATCH --cpus-per-task 6        # Number of CPUs per task per node
 #SBATCH --gpus-per-task 1        # Number of GPUs per task per node
-#SBATCH --mem=180GB              # Total CPU memory requested
+#SBATCH --mem=60GB              # Total CPU memory requested
 
 ############################################################
 # More examples about running gpu jobs on Perlmutter (NERSC)
@@ -21,11 +21,23 @@
 # - https://my.nersc.gov/script_generator.php (might be outdated)
 ############################################################
 
-# Initialize PyTorch distributed environment
-export MASTER_PORT=8888
-export MASTER_ADDR=$(srun --ntasks=1 hostname 2>&1 | tail -n1)
+GPUS_PER_NODE=2
 
-export OMP_NUM_THREADS=1
+export HDF5_USE_FILE_LOCKING=FALSE
+export NCCL_NET_GDR_LEVEL=PHB
 
-# Assume your conda environment has been activated.
-srun torchrun --nproc_per_node=1 train.res_bifpn_net.ddp.py
+## export MASTER_ADDR=$(hostname)
+## export MASTER_ADDR=$(srun --ntasks=1 hostname 2>&1 | tail -n1)
+export MASTER_ADDR=$(scontrol show hostnames ${SLURM_JOB_NODELIST} | head -n 1)
+export MASTER_PORT=6875
+
+export RANK=${SLURM_PROCID}
+export LOCAL_RANK=${SLURM_LOCALID}
+export WORLD_SIZE=${SLURM_NTASKS}
+
+export LOGLEVEL=INFO
+
+srun torchrun \
+--nproc_per_node ${GPUS_PER_NODE} --nnodes ${SLURM_NNODES} --node_rank ${SLURM_PROCID} \
+--master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} \
+train.res_bifpn_net.ddp.py
