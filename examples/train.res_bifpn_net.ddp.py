@@ -49,7 +49,6 @@ signal.signal(signal.SIGTERM, signal_handler)
 # [[[ CONFIG ]]]
 with CONFIG.enable_auto_create():
     CONFIG.DDP.BACKEND          = 'nccl'
-    CONFIG.DDP.NUM_GPU_PER_NODE = 2
 
 # [[[ DDP INIT ]]]
 # Initialize distributed environment
@@ -92,8 +91,8 @@ focal_gamma   = 2 * 10**(0)
 lr           = 3e-4
 weight_decay = 1e-4
 
-size_batch  = 5                                  # per GPU
-num_workers = 5 * CONFIG.DDP.NUM_GPU_PER_NODE    # mutiple of size_sample // size_batch
+size_batch  = 5    # per GPU
+num_workers = 5    # mutiple of size_sample // size_batch
 seed        = 0
 seed       += seed_offset
 
@@ -109,7 +108,6 @@ if ddp_rank == 0:
                 Fraction    (train)    : {frac_train}
                 Dataset size           : {size_sample}
                 Batch  size (per GPU)  : {size_batch}
-                Number of GPUs         : {CONFIG.DDP.NUM_GPU_PER_NODE}
                 lr                     : {lr}
                 weight_decay           : {weight_decay}
                 base_channels          : {base_channels}
@@ -207,7 +205,7 @@ optimizer = optim.AdamW(param_iter,
                         weight_decay = weight_decay)
 scheduler = ReduceLROnPlateau(optimizer, mode           = 'min',
                                          factor         = 2e-1,
-                                         patience       = 10,
+                                         patience       = 5,
                                          threshold      = 1e-4,
                                          threshold_mode ='rel',
                                          verbose        = True)
