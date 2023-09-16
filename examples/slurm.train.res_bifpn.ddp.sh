@@ -1,43 +1,41 @@
 #!/bin/bash
-#SBATCH --job-name=PF            # Job name
+
 #SBATCH --output=slurm/%j.log    # File to which STDOUT will be written, %j inserts jobid
 #SBATCH --error=slurm/%j.err     # File to which STDERR will be written, %j inserts jobid
 #SBATCH --account lcls_g         # Check it in your Iris portal: https://iris.nersc.gov
 #SBATCH --constraint gpu         # Use GPU
-#SBATCH --qos=debug             # See details: https://docs.nersc.gov/policies/resource-usage/#intended-purpose-of-available-qoss
-#SBATCH --time 00:29:00         # Regular only allows a max of 12 hours.  See https://docs.nersc.gov/jobs/policy/
+#SBATCH --qos=debug              # See details: https://docs.nersc.gov/policies/resource-usage/#intended-purpose-of-available-qoss
+#SBATCH --time 00:29:00          # Regular only allows a max of 12 hours.  See https://docs.nersc.gov/jobs/policy/
 #!SBATCH --qos=regular            # See details: https://docs.nersc.gov/policies/resource-usage/#intended-purpose-of-available-qoss
 #!SBATCH --time 12:00:00          # Regular only allows a max of 12 hours.  See https://docs.nersc.gov/jobs/policy/
-#SBATCH --gres=gpu:2            # GPU resources requested: 1x A100.
-#SBATCH --nodes=1                # Number of nodes
-#SBATCH --ntasks-per-node 2      # Numebr of tasks (e.g. train.py)
-#SBATCH --cpus-per-task 6        # Number of CPUs per task per node
-#SBATCH --gpus-per-task 1        # Number of GPUs per task per node
-#SBATCH --mem=60GB              # Total CPU memory requested
+#SBATCH --job-name=MULTIN_PF
+#SBATCH --gres=gpu:4
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=6
 
-############################################################
-# More examples about running gpu jobs on Perlmutter (NERSC)
-# - https://docs.nersc.gov/systems/perlmutter/running-jobs/
-# - https://my.nersc.gov/script_generator.php (might be outdated)
-############################################################
+nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
+nodes_array=($nodes)
+head_node=${nodes_array[0]}
+head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
 
-GPUS_PER_NODE=2
-
-export HDF5_USE_FILE_LOCKING=FALSE
-export NCCL_NET_GDR_LEVEL=PHB
-
-## export MASTER_ADDR=$(hostname)
-## export MASTER_ADDR=$(srun --ntasks=1 hostname 2>&1 | tail -n1)
-export MASTER_ADDR=$(scontrol show hostnames ${SLURM_JOB_NODELIST} | head -n 1)
-export MASTER_PORT=6875
-
-export RANK=${SLURM_PROCID}
-export LOCAL_RANK=${SLURM_LOCALID}
-export WORLD_SIZE=${SLURM_NTASKS}
-
+echo Node IP: $head_node_ip
 export LOGLEVEL=INFO
 
-srun torchrun \
---nproc_per_node ${GPUS_PER_NODE} --nnodes ${SLURM_NNODES} --node_rank ${SLURM_PROCID} \
---master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} \
+torchrun                    \
+--nnodes 1                  \
+--nproc_per_node 4          \
+--rdzv_id $RANDOM           \
+--rdzv_backend c10d         \
+--rdzv_endpoint localhost:0 \
 train.res_bifpn_net.ddp.py
+
+
+## torchrun                    \
+## --nnodes 2                  \
+## --nproc_per_node 2          \
+## --rdzv_id $RANDOM           \
+## --rdzv_backend c10d         \
+## --rdzv_endpoint $head_node_ip:29500 \
+## --maskter_addr=${head_node_ip} \
+## --maskter_port=1234 \
+## train.res_bifpn_net.ddp.py

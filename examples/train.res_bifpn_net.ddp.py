@@ -78,7 +78,7 @@ drc_dataset  = 'datasets'
 fl_dataset   = 'mfx13016_0028_N68+mfxp22820_0013_N37+mfx13016_0028_N63_low_photon.68v37v30.data.label_corrected.npy'       # size_sample = 3000
 path_dataset = os.path.join(drc_dataset, fl_dataset)
 
-size_sample   = 300
+size_sample   = 3000
 frac_train    = 0.8
 frac_validate = 1.0
 dataset_usage = 'train'
@@ -245,9 +245,9 @@ try:
         model.train()
 
         # Fetch batches...
-        local_train_loss    = 0.0
-        local_train_samples = 0.0
-        batch_train = tqdm.tqdm(enumerate(dataloader_train), total = len(dataloader_train))
+        batch_train     = tqdm.tqdm(enumerate(dataloader_train), total = len(dataloader_train))
+        train_loss   = torch.zeros(len(batch_train)).to(device).float()
+        train_sample = torch.zeros(len(batch_train)).to(device).float()
         for batch_idx, batch_entry in batch_train:
             # Unpack the batch entry and move them to device...
             batch_input, batch_target = batch_entry
@@ -290,29 +290,33 @@ try:
                 loss.backward()
                 optimizer.step()
 
-            local_num_samples    = len(batch_input)
-            local_train_loss    += loss.item() * local_num_samples
-            local_train_samples += local_num_samples
+            # Reporting...
+            train_loss  [batch_idx] = loss
+            train_sample[batch_idx] = len(batch_input)
+
+        # Calculate the wegihted mean...
+        train_loss_sum   = torch.sum(train_loss * train_sample)
+        train_sample_sum = train_sample.sum()
 
         # Gather training metrics
-        train_losses_list  = [torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size)]
-        train_samples_list = [torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size)]
+        world_train_loss_sum   = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
+        world_train_sample_sum = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
+        dist.all_gather(world_train_loss_sum  , train_loss_sum)
+        dist.all_gather(world_train_sample_sum, train_sample_sum)
 
-        dist.all_gather(train_losses_list,  torch.tensor(local_train_loss   ).to(device).float())
-        dist.all_gather(train_samples_list, torch.tensor(local_train_samples).to(device).float())
+        world_train_loss_mean = torch.tensor(world_train_loss_sum).sum() / torch.tensor(world_train_sample_sum).sum()
 
         if ddp_rank == 0:
-            train_loss_mean = sum(train_losses_list) / sum(train_samples_list)
-            logger.info(f"MSG (device:{device}) - epoch {epoch}, mean train loss = {train_loss_mean:.8f}")
+            logger.info(f"MSG (device:{device}) - epoch {epoch}, mean train loss = {world_train_loss_mean:.8f}")
 
 
         # ___/ VALIDATE \___
         model.eval()
 
         # Fetch batches...
-        local_validate_loss    = 0.0
-        local_validate_samples = 0.0
         batch_validate = tqdm.tqdm(enumerate(dataloader_validate), total = len(dataloader_validate))
+        validate_loss   = torch.zeros(len(batch_validate)).to(device).float()
+        validate_sample = torch.zeros(len(batch_validate)).to(device).float()
         for batch_idx, batch_entry in batch_validate:
             # Unpack the batch entry and move them to device...
             batch_input, batch_target = batch_entry
@@ -345,36 +349,37 @@ try:
                     loss = criterion(batch_output, batch_target_crop)
                     loss = loss.mean()
 
-            local_num_samples       = len(batch_input)
-            local_validate_loss    += loss.item() * local_num_samples
-            local_validate_samples += local_num_samples
+            # Reporting...
+            validate_loss  [batch_idx] = loss
+            validate_sample[batch_idx] = len(batch_input)
+
+        # Calculate the wegihted mean...
+        validate_loss_sum   = torch.sum(validate_loss * validate_sample)
+        validate_sample_sum = validate_sample.sum()
 
         # Gather training metrics
-        validate_losses_list  = [torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size)]
-        validate_samples_list = [torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size)]
+        world_validate_loss_sum   = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
+        world_validate_sample_sum = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
+        dist.all_gather(world_validate_loss_sum  , validate_loss_sum)
+        dist.all_gather(world_validate_sample_sum, validate_sample_sum)
 
-        dist.all_gather(validate_losses_list,  torch.tensor(local_validate_loss   ).to(device).float())
-        dist.all_gather(validate_samples_list, torch.tensor(local_validate_samples).to(device).float())
+        world_validate_loss_mean = torch.tensor(world_validate_loss_sum).sum() / torch.tensor(world_validate_sample_sum).sum()
 
         if ddp_rank == 0:
-            validate_loss_mean = sum(validate_losses_list) / sum(validate_samples_list)
-            logger.info(f"MSG (device:{device}) - epoch {epoch}, mean train loss = {validate_loss_mean:.8f}")
+            logger.info(f"MSG (device:{device}) - epoch {epoch}, mean val   loss = {world_validate_loss_mean:.8f}")
 
             # Report the learning rate used in the last optimization...
             lr_used = optimizer.param_groups[0]['lr']
             logger.info(f"MSG (device:{device}) - epoch {epoch}, lr used = {lr_used}")
-        else:
-            validate_loss_mean = torch.tensor(0.0).to(device)
 
         # Update learning rate in the scheduler...
-        dist.broadcast(validate_loss_mean, src = 0)
-        scheduler.step(validate_loss_mean)
+        scheduler.step(world_validate_loss_mean)
 
 
         # ___/ SAVE CHECKPOINT??? \___
         if ddp_rank == 0:
-            if validate_loss_mean < loss_min:
-                loss_min = validate_loss_mean
+            if world_validate_loss_mean < loss_min:
+                loss_min = world_validate_loss_mean
 
                 if (epoch % chkpt_saving_period == 0) or (epoch > epoch_unstable_end):
                     fl_chkpt   = f"{timestamp}.epoch_{epoch}.chkpt"
