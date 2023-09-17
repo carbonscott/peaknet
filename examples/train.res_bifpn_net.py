@@ -29,6 +29,10 @@ torch.autograd.set_detect_anomaly(True)
 
 logger = logging.getLogger(__name__)
 
+# [[[ CONFIG ]]]
+with CONFIG.enable_auto_create():
+    CONFIG.BACKBONE.FREEZE_ALL = True
+
 # [[[ USER INPUT ]]]
 timestamp_prev = None # "2023_0505_1249_26"
 epoch          = None # 21
@@ -47,7 +51,6 @@ frac_train    = 0.8
 frac_validate = 1.0
 dataset_usage = 'train'
 
-uses_skip_connection = True    # Default: True
 uses_mixed_precision = True
 
 base_channels = 8
@@ -58,8 +61,8 @@ lr           = 3e-4
 weight_decay = 1e-4
 
 num_gpu     = 1
-size_batch  = 5  * num_gpu
-num_workers = 5  * num_gpu    # mutiple of size_sample // size_batch
+size_batch  = 5
+num_workers = 5    # mutiple of size_sample // size_batch
 seed        = 0
 
 # Clarify the purpose of this experiment...
@@ -79,7 +82,6 @@ comments = f"""
             base_channels          : {base_channels}
             focal_alpha            : {focal_alpha}
             focal_gamma            : {focal_gamma}
-            uses_skip_connection   : {uses_skip_connection}
             uses_mixed_precision   : {uses_mixed_precision}
             num_workers            : {num_workers}
             continued training???  : from {fl_chkpt_prev}
@@ -160,6 +162,11 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 ##    model = nn.DataParallel(model)
 model.to(device)
 
+# Freeze the backbone???
+if CONFIG.BACKBONE.FREEZE_ALL:
+    for param in model.backbone.parameters():
+        param.requires_grad = False
+
 
 # [[[ CRITERION ]]]
 criterion = CategoricalFocalLoss(alpha = focal_alpha, gamma = focal_gamma)
@@ -204,8 +211,9 @@ for epoch in tqdm.tqdm(range(max_epochs)):
     model.train()
 
     # Fetch batches...
-    train_loss_list = []
     batch_train = tqdm.tqdm(enumerate(dataloader_train), total = len(dataloader_train))
+    train_loss   = torch.zeros(len(batch_train)).to(device).float()
+    train_sample = torch.zeros(len(batch_train)).to(device).float()
     for batch_idx, batch_entry in batch_train:
         # Unpack the batch entry and move them to device...
         batch_input, batch_target = batch_entry
@@ -249,9 +257,14 @@ for epoch in tqdm.tqdm(range(max_epochs)):
             optimizer.step()
 
         # Reporting...
-        train_loss_list.append(loss.item())
+        train_loss  [batch_idx] = loss
+        train_sample[batch_idx] = len(batch_input)
 
-    train_loss_mean = np.mean(train_loss_list)
+    # Calculate the wegihted mean...
+    train_loss_sum   = torch.dot(train_loss, train_sample)
+    train_sample_sum = train_sample.sum()
+    train_loss_mean  = train_loss_sum / train_sample_sum
+
     logger.info(f"MSG (device:{device}) - epoch {epoch}, mean train loss = {train_loss_mean:.8f}")
 
 
@@ -259,8 +272,9 @@ for epoch in tqdm.tqdm(range(max_epochs)):
     model.eval()
 
     # Fetch batches...
-    validate_loss_list = []
     batch_validate = tqdm.tqdm(enumerate(dataloader_validate), total = len(dataloader_validate))
+    validate_loss   = torch.zeros(len(batch_validate)).to(device).float()
+    validate_sample = torch.zeros(len(batch_validate)).to(device).float()
     for batch_idx, batch_entry in batch_validate:
         # Unpack the batch entry and move them to device...
         batch_input, batch_target = batch_entry
@@ -294,9 +308,14 @@ for epoch in tqdm.tqdm(range(max_epochs)):
                 loss = loss.mean()    # Collapse all losses if they are scattered on multiple gpus
 
         # Reporting...
-        validate_loss_list.append(loss.item())
+        validate_loss  [batch_idx] = loss
+        validate_sample[batch_idx] = len(batch_input)
 
-    validate_loss_mean = np.mean(validate_loss_list)
+    # Calculate the wegihted mean...
+    validate_loss_sum   = torch.dot(validate_loss, validate_sample)
+    validate_sample_sum = validate_sample.sum()
+    validate_loss_mean  = validate_loss_sum / validate_sample_sum
+
     logger.info(f"MSG (device:{device}) - epoch {epoch}, mean val   loss = {validate_loss_mean:.8f}")
 
     # Report the learning rate used in the last optimization...
