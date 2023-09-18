@@ -48,7 +48,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 # [[[ CONFIG ]]]
 with CONFIG.enable_auto_create():
-    CONFIG.DDP.BACKEND          = 'nccl'
+    CONFIG.DDP.BACKEND = 'nccl'
 
 # [[[ DDP INIT ]]]
 # Initialize distributed environment
@@ -93,8 +93,8 @@ weight_decay = 1e-4
 
 size_batch  = 5    # per GPU
 num_workers = 5    # mutiple of size_sample // size_batch
-seed        = 0
-seed       += seed_offset
+base_seed   = 0
+world_seed  = base_seed + seed_offset
 
 if ddp_rank == 0:
     # Clarify the purpose of this experiment...
@@ -129,11 +129,11 @@ if ddp_rank == 0:
 # [[[ DATASET ]]]
 # Load raw data...
 dataset_list = np.load(path_dataset, allow_pickle = True)
-data_train   , data_val_and_test = split_dataset(dataset_list     , frac_train   , seed = seed)
-data_validate, data_test         = split_dataset(data_val_and_test, frac_validate, seed = seed)
+data_train   , data_val_and_test = split_dataset(dataset_list     , frac_train   , seed = base_seed)
+data_validate, data_test         = split_dataset(data_val_and_test, frac_validate, seed = base_seed)
 
 # Set global seed...
-set_seed(seed)
+set_seed(world_seed)
 
 # Set up transformation rules
 num_patch      = 50
@@ -293,7 +293,7 @@ try:
             train_sample[batch_idx] = len(batch_input)
 
         # Calculate the wegihted mean...
-        train_loss_sum   = torch.sum(train_loss * train_sample)
+        train_loss_sum   = torch.dot(train_loss, train_sample)
         train_sample_sum = train_sample.sum()
 
         # Gather training metrics
@@ -352,7 +352,7 @@ try:
             validate_sample[batch_idx] = len(batch_input)
 
         # Calculate the wegihted mean...
-        validate_loss_sum   = torch.sum(validate_loss * validate_sample)
+        validate_loss_sum   = torch.dot(validate_loss, validate_sample)
         validate_sample_sum = validate_sample.sum()
 
         # Gather training metrics
