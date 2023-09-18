@@ -49,6 +49,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 # [[[ CONFIG ]]]
 with CONFIG.enable_auto_create():
     CONFIG.DDP.BACKEND = 'nccl'
+    CONFIG.BACKBONE.FREEZE_ALL = False
 
 # [[[ DDP INIT ]]]
 # Initialize distributed environment
@@ -115,6 +116,7 @@ if ddp_rank == 0:
                 focal_gamma            : {focal_gamma}
                 uses_mixed_precision   : {uses_mixed_precision}
                 num_workers            : {num_workers}
+                freezes_backbone       : {CONFIG.BACKBONE.FREEZE_ALL}
                 continued training???  : from {fl_chkpt_prev}
 
                 """
@@ -193,6 +195,11 @@ model.backbone.encoder.load_state_dict(chkpt, strict = False)
 model.to(device)
 model.float()
 model = DDP(model, device_ids = [ddp_local_rank], find_unused_parameters=True)
+
+# Freeze the backbone???
+if CONFIG.BACKBONE.FREEZE_ALL:
+    for param in model.backbone.parameters():
+        param.requires_grad = False
 
 
 # [[[ CRITERION ]]]
