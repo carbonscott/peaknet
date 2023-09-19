@@ -31,7 +31,8 @@ from peaknet.trans import RandomShift,  \
                           RandomPatch,  \
                           center_crop
 
-torch.autograd.set_detect_anomaly(True)
+torch.autograd.set_detect_anomaly(False)    # [WARNING] Making it True may throw errors when using bfloat16
+                                            # Reference: https://discuss.pytorch.org/t/convolutionbackward0-returned-nan-values-in-its-0th-output/175571/4
 
 logger = logging.getLogger(__name__)
 
@@ -193,13 +194,18 @@ model.backbone.encoder.load_state_dict(chkpt, strict = False)
 
 # Move model to gpu(s)...
 model.to(device)
-model.float()
-model = DDP(model, device_ids = [ddp_local_rank], find_unused_parameters=True)
 
 # Freeze the backbone???
 if CONFIG.BACKBONE.FREEZE_ALL:
     for param in model.backbone.parameters():
         param.requires_grad = False
+
+# Convert BatchNorm to SyncBatchNorm...
+model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+
+# Wrap it up using DDP...
+model.float()
+model = DDP(model, device_ids = [ddp_local_rank], find_unused_parameters=True)
 
 
 # [[[ CRITERION ]]]
