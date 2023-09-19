@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # [[[ CONFIG ]]]
 with CONFIG.enable_auto_create():
-    CONFIG.BACKBONE.FREEZE_ALL = True
+    CONFIG.BACKBONE.FREEZE_ALL = False
 
 # [[[ USER INPUT ]]]
 timestamp_prev = None # "2023_0505_1249_26"
@@ -84,6 +84,7 @@ comments = f"""
             focal_gamma            : {focal_gamma}
             uses_mixed_precision   : {uses_mixed_precision}
             num_workers            : {num_workers}
+            freezes_backbone       : {CONFIG.BACKBONE.FREEZE_ALL}
             continued training???  : from {fl_chkpt_prev}
 
             """
@@ -178,7 +179,7 @@ optimizer = optim.AdamW(param_iter,
                         weight_decay = weight_decay)
 scheduler = ReduceLROnPlateau(optimizer, mode           = 'min',
                                          factor         = 2e-1,
-                                         patience       = 10,
+                                         patience       = 5,
                                          threshold      = 1e-4,
                                          threshold_mode ='rel',
                                          verbose        = True)
