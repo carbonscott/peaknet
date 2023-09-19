@@ -51,6 +51,8 @@ signal.signal(signal.SIGTERM, signal_handler)
 with CONFIG.enable_auto_create():
     CONFIG.DDP.BACKEND = 'nccl'
     CONFIG.BACKBONE.FREEZE_ALL = False
+    CONFIG.NUM_GPUS = 4
+    CONFIG.LR_SCHEDULER.PATIENCE = 10
 
 # [[[ DDP INIT ]]]
 # Initialize distributed environment
@@ -90,7 +92,7 @@ base_channels = 8
 focal_alpha   = 1.0 * 10**(0)
 focal_gamma   = 2 * 10**(0)
 
-lr           = 3e-4
+lr           = 3e-4 * CONFIG.NUM_GPUS
 weight_decay = 1e-4
 
 size_batch  = 5    # per GPU
@@ -218,7 +220,7 @@ optimizer = optim.AdamW(param_iter,
                         weight_decay = weight_decay)
 scheduler = ReduceLROnPlateau(optimizer, mode           = 'min',
                                          factor         = 2e-1,
-                                         patience       = 5,
+                                         patience       = CONFIG.LR_SCHEDULER.PATIENCE,
                                          threshold      = 1e-4,
                                          threshold_mode ='rel',
                                          verbose        = True)
