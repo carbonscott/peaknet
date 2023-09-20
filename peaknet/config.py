@@ -1,4 +1,4 @@
-from .utils import Configurator
+from .configurator import Configurator
 
 CONFIG = Configurator()
 with CONFIG.enable_auto_create():
