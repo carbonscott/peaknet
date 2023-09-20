@@ -2,11 +2,12 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
+import yaml
 import logging
 import socket
 import tqdm
 import signal
+import argparse
 import numpy as np
 
 import torch
@@ -22,9 +23,7 @@ from peaknet.datasets.SFX           import SFXMulticlassDataset
 from peaknet.modeling.reg_bifpn_net import PeakNet
 from peaknet.criterion              import CategoricalFocalLoss
 from peaknet.utils                  import init_logger, MetaLog, split_dataset, save_checkpoint, load_checkpoint, set_seed, init_weights
-from peaknet.config                 import CONFIG
-
-from peaknet.config import CONFIG
+from peaknet.configurator           import Configurator
 
 from peaknet.trans import RandomShift,  \
                           RandomRotate, \
@@ -35,6 +34,61 @@ torch.autograd.set_detect_anomaly(False)    # [WARNING] Making it True may throw
                                             # Reference: https://discuss.pytorch.org/t/convolutionbackward0-returned-nan-values-in-its-0th-output/175571/4
 
 logger = logging.getLogger(__name__)
+
+# [[[ ARG ]]]
+parser = argparse.ArgumentParser(description="Load training configuration from a YAML file to a dictionary.")
+parser.add_argument("yaml_file", help="Path to the YAML file")
+
+args = parser.parse_args()
+
+
+# [[[ HYPER-PARAMERTERS ]]]
+# Load CONFIG from YAML
+fl_yaml = args.yaml_file
+with open(fl_yaml, 'r') as fh:
+    config_dict = yaml.safe_load(fh)
+CONFIG = Configurator.from_dict(config_dict)
+
+# ...Checkpoint
+timestamp_prev      = CONFIG.CHKPT.TIMESTAMP_PREV
+epoch_prev          = CONFIG.CHKPT.EPOCH_PREV
+drc_chkpt           = CONFIG.CHKPT.DIRECTORY
+path_pretrain_chkpt = CONFIG.CHKPT.PRETRAIN
+
+# ...Dataset
+path_dataset  = CONFIG.DATASET.PATH
+size_sample   = CONFIG.DATASET.SAMPLE_SIZE
+frac_train    = CONFIG.DATASET.FRAC_TRAIN
+frac_validate = CONFIG.DATASET.FRAC_VALIDATE
+size_batch    = CONFIG.DATASET.BATCH_SIZE
+num_workers   = CONFIG.DATASET.NUM_WORKERS
+
+# ...Model
+num_bifpn_blocks   = CONFIG.MODEL.BIFPN.NUM_BLOCKS
+num_bifpn_features = CONFIG.MODEL.BIFPN.NUM_FEATURES
+freezes_backbone   = CONFIG.MODEL.FREEZES_BACKBONE
+
+# ...Loss
+focal_alpha = CONFIG.LOSS.FOCAL.ALPHA
+focal_gamma = CONFIG.LOSS.FOCAL.GAMMA
+
+# ...Optimizer
+lr           = float(CONFIG.OPTIM.LR)
+weight_decay = float(CONFIG.OPTIM.WEIGHT_DECAY)
+
+# ...Scheduler
+patience = CONFIG.LR_SCHEDULER.PATIENCE
+
+# ...DDP
+ddp_backend = CONFIG.DDP.BACKEND
+
+# ...Misc
+uses_mixed_precision = CONFIG.MISC.USES_MIXED_PRECISION
+max_epochs           = CONFIG.MISC.MAX_EPOCHS
+num_gpus             = CONFIG.MISC.NUM_GPUS
+
+# Update hyperparameter if necessary...
+lr *= num_gpus
 
 
 # [[[ ERROR HANDLING ]]]
@@ -47,19 +101,12 @@ signal.signal(signal.SIGINT,  signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 
-# [[[ CONFIG ]]]
-with CONFIG.enable_auto_create():
-    CONFIG.DDP.BACKEND = 'nccl'
-    CONFIG.BACKBONE.FREEZE_ALL = False
-    CONFIG.NUM_GPUS = 4
-    CONFIG.LR_SCHEDULER.PATIENCE = 10
-
 # [[[ DDP INIT ]]]
 # Initialize distributed environment
 ddp_rank       = int(os.environ["RANK"      ])
 ddp_local_rank = int(os.environ["LOCAL_RANK"])
 ddp_world_size = int(os.environ["WORLD_SIZE"])
-dist.init_process_group(backend=CONFIG.DDP.BACKEND, rank = ddp_rank, world_size = ddp_world_size, init_method = "env://")
+dist.init_process_group(backend=ddp_backend, rank = ddp_rank, world_size = ddp_world_size, init_method = "env://")
 print(f"RANK:{ddp_rank},LOCAL_RANK:{ddp_local_rank},WORLD_SIZE:{ddp_world_size}")
 
 # Set up GPU device
@@ -68,35 +115,12 @@ torch.cuda.set_device(device)
 seed_offset  = ddp_rank
 
 
-# [[[ USER INPUT ]]]
-timestamp_prev = None # "2023_0505_1249_26"
-epoch          = None # 21
-
-drc_chkpt = "chkpts"
-fl_chkpt_prev   = None if timestamp_prev is None else f"{timestamp_prev}.epoch_{epoch}.chkpt"
+# [[[ USE YAML CONFIG TO INITIALIZE HYPERPARAMETERS ]]]
+# ...Checkpoint
+fl_chkpt_prev   = None if timestamp_prev is None else f"{timestamp_prev}.epoch_{epoch_prev}.chkpt"
 path_chkpt_prev = None if fl_chkpt_prev is None else os.path.join(drc_chkpt, fl_chkpt_prev)
 
-# Set up parameters for an experiment...
-drc_dataset  = 'datasets'
-fl_dataset   = 'mfx13016_0028_N68+mfxp22820_0013_N37+mfx13016_0028_N63_low_photon.68v37v30.data.label_corrected.npy'       # size_sample = 3000
-path_dataset = os.path.join(drc_dataset, fl_dataset)
-
-size_sample   = 3000
-frac_train    = 0.8
-frac_validate = 1.0
-dataset_usage = 'train'
-
-uses_mixed_precision = True
-
-base_channels = 8
-focal_alpha   = 1.0 * 10**(0)
-focal_gamma   = 2 * 10**(0)
-
-lr           = 3e-4 * CONFIG.NUM_GPUS
-weight_decay = 1e-4
-
-size_batch  = 5    # per GPU
-num_workers = 5    # mutiple of size_sample // size_batch
+# Set Seed
 base_seed   = 0
 world_seed  = base_seed + seed_offset
 
@@ -114,12 +138,11 @@ if ddp_rank == 0:
                 Batch  size (per GPU)  : {size_batch}
                 lr                     : {lr}
                 weight_decay           : {weight_decay}
-                base_channels          : {base_channels}
                 focal_alpha            : {focal_alpha}
                 focal_gamma            : {focal_gamma}
                 uses_mixed_precision   : {uses_mixed_precision}
                 num_workers            : {num_workers}
-                freezes_backbone       : {CONFIG.BACKBONE.FREEZE_ALL}
+                freezes_backbone       : {freezes_backbone}
                 continued training???  : from {fl_chkpt_prev}
 
                 """
@@ -185,20 +208,19 @@ dataloader_validate = torch.utils.data.DataLoader( dataset_validate,
 
 # [[[ MODEL ]]]
 # Use the model architecture -- attention u-net...
-model = PeakNet(num_blocks = 1, num_features = 64)
+model = PeakNet(num_blocks = num_bifpn_blocks, num_features = num_bifpn_features)
 if ddp_rank == 0:
     print(f"{sum(p.numel() for p in model.parameters())/1e6} M pamameters.")
 
 # Use pretrained weights...
-path_chkpt = os.path.join("pretrained_chkpts", "transfered_weights.resnet50.chkpt")
-chkpt      = torch.load(path_chkpt)
-model.backbone.encoder.load_state_dict(chkpt, strict = False)
+pretrain_chkpt      = torch.load(path_pretrain_chkpt)
+model.backbone.encoder.load_state_dict(pretrain_chkpt, strict = False)
 
 # Move model to gpu(s)...
 model.to(device)
 
 # Freeze the backbone???
-if CONFIG.BACKBONE.FREEZE_ALL:
+if freezes_backbone:
     for param in model.backbone.parameters():
         param.requires_grad = False
 
@@ -220,15 +242,13 @@ optimizer = optim.AdamW(param_iter,
                         weight_decay = weight_decay)
 scheduler = ReduceLROnPlateau(optimizer, mode           = 'min',
                                          factor         = 2e-1,
-                                         patience       = CONFIG.LR_SCHEDULER.PATIENCE,
+                                         patience       = patience,
                                          threshold      = 1e-4,
                                          threshold_mode ='rel',
                                          verbose        = True)
 
 
 # [[[ TRAIN LOOP ]]]
-max_epochs = 3000
-
 # From a prev training???
 epoch_min = 0
 loss_min  = float('inf')
