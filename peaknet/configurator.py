@@ -46,11 +46,8 @@ class Configurator(dict):
     def from_dict(cls, data):
         instance = cls()
         for key, value in data.items():
-            # Keep an lookout on any dictionary???
             if isinstance(value, dict):
                 instance[key] = cls.from_dict(value)
-
-            # Otherwise save the value...
             else:
                 instance[key] = value
 
