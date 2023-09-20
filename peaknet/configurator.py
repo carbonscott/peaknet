@@ -2,6 +2,11 @@ from contextlib import contextmanager
 
 
 class Configurator(dict):
+    """
+    Poorman's configurator, basically like AttrDict.
+
+    Reference: https://github.com/facebookresearch/Detectron/blob/main/detectron/utils/collections.py
+    """
     __auto_create = False
 
     def __getattr__(self, attr):
