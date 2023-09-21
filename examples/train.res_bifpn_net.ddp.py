@@ -94,9 +94,6 @@ uses_mixed_precision = CONFIG.MISC.USES_MIXED_PRECISION
 max_epochs           = CONFIG.MISC.MAX_EPOCHS
 num_gpus             = CONFIG.MISC.NUM_GPUS
 
-# Update hyperparameter if necessary...
-lr *= num_gpus
-
 
 # [[[ ERROR HANDLING ]]]
 def signal_handler(signal, frame):
