@@ -1,8 +1,9 @@
 CHKPT:
-  TIMESTAMP_PREV : null
-  EPOCH_PREV     : null
-  DIRECTORY      : chkpts
-  PRETRAIN       : "pretrained_chkpts/transfered_weights.resnet50.chkpt"
+  TIMESTAMP_PREV  : null
+  EPOCH_PREV      : null
+  DIRECTORY       : chkpts
+  PRETRAIN        : "pretrained_chkpts/transfered_weights.resnet50.chkpt"
+  FILENAME_PREFIX : null
 
 DATASET:
   PATH           : "datasets/mfx13016_0028_N68+mfxp22820_0013_N37+mfx13016_0028_N63_low_photon.68v37v30.data.label_corrected.npy"
@@ -17,6 +18,7 @@ MODEL:
     NUM_BLOCKS   : 1
     NUM_FEATURES : 64
   FREEZES_BACKBONE : false
+  USES_RANDOM_WEIGHTS : false
 
 LOSS:
   FOCAL:
@@ -31,10 +33,12 @@ LR_SCHEDULER:
   PATIENCE : 10
 
 DDP:
-  BACKEND : nccl
+  BACKEND                : nccl
+  USES_UNIQUE_WORLD_SEED : false
 
 LOGGING:
-  DIRECTORY : logs
+  DIRECTORY       : logs
+  FILENAME_PREFIX : null
 
 MISC:
   USES_MIXED_PRECISION : true

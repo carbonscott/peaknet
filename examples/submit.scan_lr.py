@@ -35,6 +35,8 @@ os.makedirs(drc_yaml, exist_ok = True)
 drc_slurm = os.path.join(drc_base, 'slurm')
 os.makedirs(drc_slurm, exist_ok = True)
 
+# Specify if unique world seed should be used...
+CONFIG.DDP.USES_UNIQUE_WORLD_SEED = True
 
 # Specify the configuration to scan and the range...
 lr_scan_range = [2e-3, 1e-3, 0.5e-3]
@@ -85,6 +87,12 @@ for enum_idx, lr in enumerate(lr_scan_range):
     job_name = f"{job_basename}.{enum_idx:02d}"
     # Get a new scan value...
     CONFIG.OPTIM.LR = lr
+
+    # Specify chkpt and log filename...
+    CONFIG.CHKPT.FILENAME_PREFIX = job_name
+    CONFIG.LOGGING.FILENAME_PREFIX = job_name
+
+    # Export config...
     output_config = CONFIG.to_dict()
 
     # Write to a YAML file...
