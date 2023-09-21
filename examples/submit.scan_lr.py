@@ -60,7 +60,7 @@ def custom_slurm_content(job_name, cwd, trainer, path_output_slurm, path_output_
         f"\n"
         f"cd {cwd}\n"
         f"\n"
-        f"echo \"sbatch {path_output_slurm}\n"
+        f"echo \"sbatch {path_output_slurm}\"\n"
         f"\n"
         f"nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) ) \n"
         f"nodes_array=($nodes)\n"
