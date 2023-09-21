@@ -54,6 +54,7 @@ timestamp_prev      = CONFIG.CHKPT.TIMESTAMP_PREV
 epoch_prev          = CONFIG.CHKPT.EPOCH_PREV
 drc_chkpt           = CONFIG.CHKPT.DIRECTORY
 path_pretrain_chkpt = CONFIG.CHKPT.PRETRAIN
+fl_chkpt_prev       = CONFIG.CHKPT.FILENAME_PREFIX
 
 # ...Dataset
 path_dataset  = CONFIG.DATASET.PATH
@@ -64,9 +65,10 @@ size_batch    = CONFIG.DATASET.BATCH_SIZE
 num_workers   = CONFIG.DATASET.NUM_WORKERS
 
 # ...Model
-num_bifpn_blocks   = CONFIG.MODEL.BIFPN.NUM_BLOCKS
-num_bifpn_features = CONFIG.MODEL.BIFPN.NUM_FEATURES
-freezes_backbone   = CONFIG.MODEL.FREEZES_BACKBONE
+num_bifpn_blocks    = CONFIG.MODEL.BIFPN.NUM_BLOCKS
+num_bifpn_features  = CONFIG.MODEL.BIFPN.NUM_FEATURES
+freezes_backbone    = CONFIG.MODEL.FREEZES_BACKBONE
+uses_random_weights = CONFIG.MODEL.USES_RANDOM_WEIGHTS
 
 # ...Loss
 focal_alpha = CONFIG.LOSS.FOCAL.ALPHA
@@ -80,7 +82,12 @@ weight_decay = float(CONFIG.OPTIM.WEIGHT_DECAY)
 patience = CONFIG.LR_SCHEDULER.PATIENCE
 
 # ...DDP
-ddp_backend = CONFIG.DDP.BACKEND
+ddp_backend            = CONFIG.DDP.BACKEND
+uses_unique_world_seed = CONFIG.DDP.USES_UNIQUE_WORLD_SEED
+
+# ...Logging
+drc_log       = CONFIG.LOGGING.DIRECTORY
+fl_log_prefix = CONFIG.LOGGING.FILENAME_PREFIX
 
 # ...Misc
 uses_mixed_precision = CONFIG.MISC.USES_MIXED_PRECISION
@@ -112,7 +119,7 @@ print(f"RANK:{ddp_rank},LOCAL_RANK:{ddp_local_rank},WORLD_SIZE:{ddp_world_size}"
 # Set up GPU device
 device = f'cuda:{ddp_local_rank}'
 torch.cuda.set_device(device)
-seed_offset  = ddp_rank
+seed_offset = ddp_rank if uses_unique_world_seed else 0
 
 
 # [[[ USE YAML CONFIG TO INITIALIZE HYPERPARAMETERS ]]]
@@ -147,7 +154,7 @@ if ddp_rank == 0:
 
                 """
 
-    timestamp = init_logger(returns_timestamp = True)
+    timestamp = init_logger(fl_prefix = fl_log_prefix, drc_log = drc_log, returns_timestamp = True)
 
     # Create a metalog to the log file, explaining the purpose of this run...
     metalog = MetaLog( comments = comments )
@@ -156,9 +163,10 @@ if ddp_rank == 0:
 
 # [[[ DATASET ]]]
 # Load raw data...
+set_seed(base_seed)    # ...Make sure data split is consistent across devices
 dataset_list = np.load(path_dataset, allow_pickle = True)
-data_train   , data_val_and_test = split_dataset(dataset_list     , frac_train   , seed = base_seed)
-data_validate, data_test         = split_dataset(data_val_and_test, frac_validate, seed = base_seed)
+data_train   , data_val_and_test = split_dataset(dataset_list     , frac_train   )
+data_validate, data_test         = split_dataset(data_val_and_test, frac_validate)
 
 # Set global seed...
 set_seed(world_seed)
@@ -207,17 +215,21 @@ dataloader_validate = torch.utils.data.DataLoader( dataset_validate,
 
 
 # [[[ MODEL ]]]
-# Use the model architecture -- attention u-net...
+# Use the model architecture -- regnet + bifpn...
 model = PeakNet(num_blocks = num_bifpn_blocks, num_features = num_bifpn_features)
+model.to(device)
 if ddp_rank == 0:
     print(f"{sum(p.numel() for p in model.parameters())/1e6} M pamameters.")
 
-# Use pretrained weights...
-pretrain_chkpt      = torch.load(path_pretrain_chkpt)
-model.backbone.encoder.load_state_dict(pretrain_chkpt, strict = False)
-
-# Move model to gpu(s)...
-model.to(device)
+# Initialized by the main rank and weights will be broadcast by DDP wrapper
+if ddp_rank == 0:
+    if uses_random_weights:
+        # Use random weights...
+        model.apply(init_weights)
+    else:
+        # Use pretrained weights...
+        pretrain_chkpt = torch.load(path_pretrain_chkpt)
+        model.backbone.encoder.load_state_dict(pretrain_chkpt, strict = False)
 
 # Freeze the backbone???
 if freezes_backbone:
@@ -415,7 +427,8 @@ try:
                 loss_min = world_validate_loss_mean
 
                 if (epoch % chkpt_saving_period == 0) or (epoch > epoch_unstable_end):
-                    fl_chkpt   = f"{timestamp}.epoch_{epoch}.chkpt"
+                    fl_chkpt = f"{timestamp}.epoch_{epoch}.chkpt"
+                    if fl_chkpt_prefix is not None: fl_chkpt = f"{fl_chkpt_prefix}.{fl_chkpt}"
                     path_chkpt = os.path.join(drc_chkpt, fl_chkpt)
                     save_checkpoint(model, optimizer, scheduler, epoch, loss_min, path_chkpt)
                     logger.info(f"MSG (device:{device}) - save {path_chkpt}")
