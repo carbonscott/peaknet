@@ -54,7 +54,7 @@ timestamp_prev      = CONFIG.CHKPT.TIMESTAMP_PREV
 epoch_prev          = CONFIG.CHKPT.EPOCH_PREV
 drc_chkpt           = CONFIG.CHKPT.DIRECTORY
 path_pretrain_chkpt = CONFIG.CHKPT.PRETRAIN
-fl_chkpt_prev       = CONFIG.CHKPT.FILENAME_PREFIX
+fl_chkpt_prefix     = CONFIG.CHKPT.FILENAME_PREFIX
 
 # ...Dataset
 path_dataset  = CONFIG.DATASET.PATH
