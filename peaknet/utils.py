@@ -41,7 +41,7 @@ def init_logger(fl_prefix = None, drc_log = "logs", returns_timestamp = False):
     # Set up the log file...
     # ...filename
     fl_log = f"{timestamp}.log"
-    if fl_prefix is not None: fl_log = f"{fl_prefix}.{timestamp}.log"
+    if fl_prefix is not None: fl_log = f"{fl_prefix}.{fl_log}"
 
     # ...path
     os.makedirs(drc_log, exist_ok = True)
