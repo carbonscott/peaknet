@@ -33,20 +33,15 @@ def set_seed(seed):
 
 
 
-def init_logger(returns_timestamp = False):
+def init_logger(fl_log = None, drc_log = "logs", returns_timestamp = False):
     # Create a timestamp to name the log file...
     now = datetime.now()
     timestamp = now.strftime("%Y_%m%d_%H%M_%S")
 
-    # Configure the location to run the job...
-    drc_cwd = os.getcwd()
-
     # Set up the log file...
-    fl_log         = f"{timestamp}.train.log"
-    DRCLOG         = "logs"
-    prefixpath_log = os.path.join(drc_cwd, DRCLOG)
-    if not os.path.exists(prefixpath_log): os.makedirs(prefixpath_log)
-    path_log = os.path.join(prefixpath_log, fl_log)
+    fl_log = f"{timestamp}.train.log" if fl_log is None else fl_log
+    os.makedirs(drc_log, exist_ok = True)
+    path_log = os.path.join(drc_log, fl_log)
 
     # Config logging behaviors
     logging.basicConfig( filename = path_log,
