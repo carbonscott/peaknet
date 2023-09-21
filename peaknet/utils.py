@@ -50,7 +50,7 @@ def init_logger(fl_prefix = None, drc_log = "logs", returns_timestamp = False):
     # Config logging behaviors
     logging.basicConfig( filename = path_log,
                          filemode = 'w',
-                         format="%(asctime)s %(levelname)s %(name)-35s - %(message)s",
+                         format="%(asctime)s %(levelname)s %(name)s\n%(message)s",
                          datefmt="%m/%d/%Y %H:%M:%S",
                          level=logging.INFO, )
     logger = logging.getLogger(__name__)

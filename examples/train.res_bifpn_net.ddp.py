@@ -22,7 +22,7 @@ import torch.distributed as dist
 from peaknet.datasets.SFX           import SFXMulticlassDataset
 from peaknet.modeling.reg_bifpn_net import PeakNet
 from peaknet.criterion              import CategoricalFocalLoss
-from peaknet.utils                  import init_logger, MetaLog, split_dataset, save_checkpoint, load_checkpoint, set_seed, init_weights
+from peaknet.utils                  import init_logger, split_dataset, save_checkpoint, load_checkpoint, set_seed, init_weights
 from peaknet.configurator           import Configurator
 
 from peaknet.trans import RandomShift,  \
@@ -129,33 +129,15 @@ base_seed   = 0
 world_seed  = base_seed + seed_offset
 
 if ddp_rank == 0:
-    # Clarify the purpose of this experiment...
-    hostname = socket.gethostname()
-    comments = f"""
-                Hostname: {hostname}.
-
-                Online training.
-
-                File (Dataset)         : {path_dataset}
-                Fraction    (train)    : {frac_train}
-                Dataset size           : {size_sample}
-                Batch  size (per GPU)  : {size_batch}
-                lr                     : {lr}
-                weight_decay           : {weight_decay}
-                focal_alpha            : {focal_alpha}
-                focal_gamma            : {focal_gamma}
-                uses_mixed_precision   : {uses_mixed_precision}
-                num_workers            : {num_workers}
-                freezes_backbone       : {freezes_backbone}
-                continued training???  : from {fl_chkpt_prev}
-
-                """
-
+    # Fetch the current timestamp...
     timestamp = init_logger(fl_prefix = fl_log_prefix, drc_log = drc_log, returns_timestamp = True)
 
-    # Create a metalog to the log file, explaining the purpose of this run...
-    metalog = MetaLog( comments = comments )
-    metalog.report()
+    # Convert dictionary to yaml formatted string...
+    config_dict = CONFIG.to_dict()
+    config_yaml = yaml.dump(config_dict)
+
+    # Log the config...
+    logger.info(config_yaml)
 
 
 # [[[ DATASET ]]]
