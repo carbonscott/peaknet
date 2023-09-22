@@ -28,6 +28,7 @@ LOSS:
 OPTIM:
   LR           : 3e-4
   WEIGHT_DECAY : 1e-4
+  GRAD_CLIP    : 1.0
 
 LR_SCHEDULER:
   PATIENCE : 10

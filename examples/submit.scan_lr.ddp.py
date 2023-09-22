@@ -44,7 +44,10 @@ lr_scan_range = [2e-3, 1e-3, 0.5e-3]
 # Write the slurm job template...
 cwd = os.getcwd()
 
-def custom_slurm_content(job_name, cwd, trainer, path_output_slurm, path_output_yaml):
+# Specify number of gpus...
+num_gpus = CONFIG.MISC.NUM_GPUS
+
+def custom_slurm_content(job_name, num_gpus, cwd, trainer, path_output_slurm, path_output_yaml):
     return  (
         f"#!/bin/bash\n"
         f"#SBATCH --output=slurm/%j.log    # File to which STDOUT will be written, %j inserts jobid\n"
@@ -56,18 +59,28 @@ def custom_slurm_content(job_name, cwd, trainer, path_output_slurm, path_output_
         f"#SBATCH --qos=regular            # See details: https://docs.nersc.gov/policies/resource-usage/#intended-purpose-of-available-qoss\n"
         f"#SBATCH --time 12:00:00          # Regular only allows a max of 12 hours.  See https://docs.nersc.gov/jobs/policy/\n"
         f"#SBATCH --job-name={job_name}\n"
-        f"#!SBATCH --gres=gpu:1\n"
+        f"#SBATCH --gres=gpu:{num_gpus}\n"
         f"#SBATCH --nodes=1\n"
-        f"#SBATCH --ntasks-per-node=1\n"
         f"#SBATCH --cpus-per-task=6\n"
-        f"#SBATCH --gpus-per-task=1\n"
-        f"#!SBATCH --mem=180GB\n"
         f"\n"
         f"cd {cwd}\n"
         f"\n"
         f"echo \"sbatch {path_output_slurm}\"\n"
         f"\n"
-        f"srun                        \\\n"
+        f"nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) ) \n"
+        f"nodes_array=($nodes)\n"
+        f"head_node=${{nodes_array[0]}}\n"
+        f"head_node_ip=$(srun --nodes=1 --ntasks=1 -w \"$head_node\" hostname --ip-address)\n"
+        f"\n"
+        f"echo Node IP: $head_node_ip\n"
+        f"export LOGLEVEL=INFO\n"
+        f"\n"
+        f"torchrun                    \\\n"
+        f"--nnodes 1                  \\\n"
+        f"--nproc_per_node {num_gpus} \\\n"
+        f"--rdzv_id $RANDOM           \\\n"
+        f"--rdzv_backend c10d         \\\n"
+        f"--rdzv_endpoint localhost:0 \\\n"
         f"{trainer} {path_output_yaml}"
     )
 
@@ -94,6 +107,6 @@ for enum_idx, lr in enumerate(lr_scan_range):
     # Write a slurm script...
     fl_output_slurm = f"{job_name}.sbatch"
     path_output_slurm = os.path.join(drc_slurm, fl_output_slurm)
-    slurm_output_content = custom_slurm_content(job_name, cwd, trainer, path_output_slurm, path_output_yaml)
+    slurm_output_content = custom_slurm_content(job_name, num_gpus, cwd, trainer, path_output_slurm, path_output_yaml)
     with open(path_output_slurm, 'w') as fh:
         fh.write(slurm_output_content)

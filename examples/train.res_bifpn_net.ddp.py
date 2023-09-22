@@ -77,6 +77,7 @@ focal_gamma = CONFIG.LOSS.FOCAL.GAMMA
 # ...Optimizer
 lr           = float(CONFIG.OPTIM.LR)
 weight_decay = float(CONFIG.OPTIM.WEIGHT_DECAY)
+grad_clip    = float(CONFIG.OPTIM.GRAD_CLIP)
 
 # ...Scheduler
 patience = CONFIG.LR_SCHEDULER.PATIENCE
@@ -107,14 +108,21 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 # [[[ DDP INIT ]]]
 # Initialize distributed environment
-ddp_rank       = int(os.environ["RANK"      ])
-ddp_local_rank = int(os.environ["LOCAL_RANK"])
-ddp_world_size = int(os.environ["WORLD_SIZE"])
-dist.init_process_group(backend=ddp_backend, rank = ddp_rank, world_size = ddp_world_size, init_method = "env://")
-print(f"RANK:{ddp_rank},LOCAL_RANK:{ddp_local_rank},WORLD_SIZE:{ddp_world_size}")
+uses_ddp = int(os.environ.get("RANK", -1)) != -1
+if uses_ddp:
+    ddp_rank       = int(os.environ["RANK"      ])
+    ddp_local_rank = int(os.environ["LOCAL_RANK"])
+    ddp_world_size = int(os.environ["WORLD_SIZE"])
+    dist.init_process_group(backend=ddp_backend, rank = ddp_rank, world_size = ddp_world_size, init_method = "env://")
+    print(f"RANK:{ddp_rank},LOCAL_RANK:{ddp_local_rank},WORLD_SIZE:{ddp_world_size}")
+else:
+    ddp_rank       = 0
+    ddp_local_rank = 0
+    ddp_world_size = 1
+    print(f"NO DDP is used.  RANK:{ddp_rank},LOCAL_RANK:{ddp_local_rank},WORLD_SIZE:{ddp_world_size}")
 
 # Set up GPU device
-device = f'cuda:{ddp_local_rank}'
+device = f'cuda:{ddp_local_rank}' if torch.cuda.is_available() else 'cpu'
 torch.cuda.set_device(device)
 seed_offset = ddp_rank if uses_unique_world_seed else 0
 
@@ -220,7 +228,8 @@ model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
 # Wrap it up using DDP...
 model.float()
-model = DDP(model, device_ids = [ddp_local_rank], find_unused_parameters=True)
+if uses_ddp:
+    model = DDP(model, device_ids = [ddp_local_rank], find_unused_parameters=True)
 
 
 # [[[ CRITERION ]]]
@@ -295,6 +304,9 @@ try:
                 # Backward pass and optimization...
                 optimizer.zero_grad()
                 scaler.scale(loss).backward()
+                if grad_clip != 0.0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
                 scaler.step(optimizer)
                 scaler.update()
             else:
@@ -312,6 +324,8 @@ try:
                 # Backward pass and optimization...
                 optimizer.zero_grad()
                 loss.backward()
+                if grad_clip != 0.0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
                 optimizer.step()
 
             # Reporting...
