@@ -177,7 +177,7 @@ dataset_train = SFXMulticlassDataset( data_list          = data_train,
                                       normalizes_data    = True,
                                       prints_cache_state = True,
                                       mpi_comm           = None, )
-sampler_train    = torch.utils.data.DistributedSampler(dataset_train)
+sampler_train    = torch.utils.data.DistributedSampler(dataset_train) if uses_ddp else None
 dataloader_train = torch.utils.data.DataLoader( dataset_train,
                                                 sampler     = sampler_train,
                                                 shuffle     = False,
@@ -192,7 +192,7 @@ dataset_validate = SFXMulticlassDataset( data_list          = data_validate,
                                          normalizes_data    = True,
                                          prints_cache_state = True,
                                          mpi_comm           = None, )
-sampler_validate    = torch.utils.data.DistributedSampler(dataset_validate, shuffle=False)
+sampler_validate    = torch.utils.data.DistributedSampler(dataset_validate, shuffle=False) if uses_ddp else None
 dataloader_validate = torch.utils.data.DataLoader( dataset_validate,
                                                    sampler     = sampler_validate,
                                                    shuffle     = False,
@@ -267,8 +267,9 @@ try:
     for epoch in tqdm.tqdm(range(max_epochs)):
         epoch += epoch_min
 
-        # Shuffle the training examples...
-        sampler_train.set_epoch(epoch)
+        if uses_ddp:
+            # Shuffle the training examples...
+            sampler_train.set_epoch(epoch)
 
         # Uses mixed precision???
         if uses_mixed_precision: scaler = torch.cuda.amp.GradScaler()
