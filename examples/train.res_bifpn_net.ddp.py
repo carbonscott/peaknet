@@ -223,12 +223,13 @@ if freezes_backbone:
     for param in model.backbone.parameters():
         param.requires_grad = False
 
-# Convert BatchNorm to SyncBatchNorm...
-model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-
-# Wrap it up using DDP...
 model.float()
+
 if uses_ddp:
+    # Convert BatchNorm to SyncBatchNorm...
+    model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+
+    # Wrap it up using DDP...
     model = DDP(model, device_ids = [ddp_local_rank], find_unused_parameters=True)
 
 
