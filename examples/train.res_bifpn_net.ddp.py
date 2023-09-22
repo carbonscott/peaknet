@@ -338,13 +338,16 @@ try:
         train_loss_sum   = torch.dot(train_loss, train_sample)
         train_sample_sum = train_sample.sum()
 
-        # Gather training metrics
-        world_train_loss_sum   = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
-        world_train_sample_sum = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
-        dist.all_gather(world_train_loss_sum  , train_loss_sum)
-        dist.all_gather(world_train_sample_sum, train_sample_sum)
+        if uses_ddp:
+            # Gather training metrics
+            world_train_loss_sum   = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
+            world_train_sample_sum = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
+            dist.all_gather(world_train_loss_sum  , train_loss_sum)
+            dist.all_gather(world_train_sample_sum, train_sample_sum)
 
-        world_train_loss_mean = torch.tensor(world_train_loss_sum).sum() / torch.tensor(world_train_sample_sum).sum()
+            world_train_loss_mean = torch.tensor(world_train_loss_sum).sum() / torch.tensor(world_train_sample_sum).sum()
+        else:
+            world_train_loss_mean = train_loss_sum / train_sample_sum
 
         if ddp_rank == 0:
             logger.info(f"MSG (device:{device}) - epoch {epoch}, mean train loss = {world_train_loss_mean:.8f}")
@@ -397,13 +400,16 @@ try:
         validate_loss_sum   = torch.dot(validate_loss, validate_sample)
         validate_sample_sum = validate_sample.sum()
 
-        # Gather training metrics
-        world_validate_loss_sum   = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
-        world_validate_sample_sum = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
-        dist.all_gather(world_validate_loss_sum  , validate_loss_sum)
-        dist.all_gather(world_validate_sample_sum, validate_sample_sum)
+        if uses_ddp:
+            # Gather training metrics
+            world_validate_loss_sum   = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
+            world_validate_sample_sum = [ torch.tensor(0.0).to(device).float() for _ in range(ddp_world_size) ]
+            dist.all_gather(world_validate_loss_sum  , validate_loss_sum)
+            dist.all_gather(world_validate_sample_sum, validate_sample_sum)
 
-        world_validate_loss_mean = torch.tensor(world_validate_loss_sum).sum() / torch.tensor(world_validate_sample_sum).sum()
+            world_validate_loss_mean = torch.tensor(world_validate_loss_sum).sum() / torch.tensor(world_validate_sample_sum).sum()
+        else:
+            world_validate_loss_mean = validate_loss_sum / validate_sample_sum
 
         if ddp_rank == 0:
             logger.info(f"MSG (device:{device}) - epoch {epoch}, mean val   loss = {world_validate_loss_mean:.8f}")
@@ -428,7 +434,7 @@ try:
                     save_checkpoint(model, optimizer, scheduler, epoch, loss_min, path_chkpt)
                     logger.info(f"MSG (device:{device}) - save {path_chkpt}")
 
-        dist.barrier()
+        if uses_ddp: dist.barrier()
 
 except KeyboardInterrupt:
     print(f"DDP RANK {ddp_rank}: Training was interrupted!")
