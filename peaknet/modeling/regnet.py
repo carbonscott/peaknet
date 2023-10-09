@@ -18,7 +18,7 @@ import torch
 import torch.nn            as nn
 import torch.nn.functional as F
 
-from ..config import CONFIG
+from ..configurator import Configurator
 
 from .blocks import conv2d, pool2d
 
@@ -37,18 +37,31 @@ class ResStem(nn.Module):
     Spatial dimension change: (H, W) -> (H//4, W//4)
     """
 
-    def __init__(self, stem_in_channels, stem_out_channels):
+    @staticmethod
+    def get_default_config():
+        CONFIG = Configurator()
+        with CONFIG.enable_auto_create():
+            CONFIG.BN.EPS       = 1e-5
+            CONFIG.BN.MOMENTUM  = 1e-1
+            CONFIG.RELU_INPLACE = False
+
+        return CONFIG
+
+
+    def __init__(self, stem_in_channels, stem_out_channels, config = None):
         super().__init__()
+
+        if config is None: config = ResStem.get_default_config()
 
         self.conv = conv2d(stem_in_channels,
                            stem_out_channels,
                            kernel_size = 7,
                            stride      = 2,)
         self.bn   = nn.BatchNorm2d(num_features = stem_out_channels,
-                                   eps          = CONFIG.RESSTEM.BN.EPS,
-                                   momentum     = CONFIG.RESSTEM.BN.MOMENTUM,)
+                                   eps          = config.BN.EPS,
+                                   momentum     = config.BN.MOMENTUM,)
 
-        self.relu = nn.ReLU(inplace = CONFIG.RESSTEM.RELU_INPLACE)
+        self.relu = nn.ReLU(inplace = config.RELU_INPLACE)
 
 
     def forward(self, x):
@@ -67,8 +80,28 @@ class ResBlock(nn.Module):
     in_channels, mid_channels (bottleneck channels), out_channels
     """
 
-    def __init__(self, block_in_channels, block_out_channels, mid_conv_channels, mid_conv_groups = 1, in_conv_stride = 1, mid_conv_stride = 1):
+    @staticmethod
+    def get_default_config():
+        CONFIG = Configurator()
+        with CONFIG.enable_auto_create():
+            CONFIG.BN.EPS       = 1e-5
+            CONFIG.BN.MOMENTUM  = 1e-1
+            CONFIG.RELU_INPLACE = False
+            CONFIG.USES_RES_V1p5 = True
+
+        return CONFIG
+
+
+    def __init__(self, block_in_channels,
+                       block_out_channels,
+                       mid_conv_channels,
+                       mid_conv_groups = 1,
+                       in_conv_stride  = 1,
+                       mid_conv_stride = 1,
+                       config          = None):
         super().__init__()
+
+        if config is None: config = ResBlock.get_default_config()
 
         self.in_conv = nn.Sequential(
             conv2d(block_in_channels,
@@ -76,9 +109,9 @@ class ResBlock(nn.Module):
                    kernel_size = 1,
                    stride      = in_conv_stride,),
             nn.BatchNorm2d(num_features = mid_conv_channels,
-                           eps          = CONFIG.RESBLOCK.BN.EPS,
-                           momentum     = CONFIG.RESBLOCK.BN.MOMENTUM,),
-            nn.ReLU(inplace = CONFIG.RESBLOCK.RELU_INPLACE),
+                           eps          = config.BN.EPS,
+                           momentum     = config.BN.MOMENTUM,),
+            nn.ReLU(inplace = config.RELU_INPLACE),
         )
 
         self.mid_conv = nn.Sequential(
@@ -88,9 +121,9 @@ class ResBlock(nn.Module):
                    stride      = mid_conv_stride,
                    groups      = mid_conv_groups),
             nn.BatchNorm2d(num_features = mid_conv_channels,
-                           eps          = CONFIG.RESBLOCK.BN.EPS,
-                           momentum     = CONFIG.RESBLOCK.BN.MOMENTUM,),
-            nn.ReLU(inplace = CONFIG.RESBLOCK.RELU_INPLACE),
+                           eps          = config.BN.EPS,
+                           momentum     = config.BN.MOMENTUM,),
+            nn.ReLU(inplace = config.RELU_INPLACE),
         )
 
         self.out_conv = nn.Sequential(
@@ -99,8 +132,8 @@ class ResBlock(nn.Module):
                    kernel_size = 1,
                    stride      = 1,),
             nn.BatchNorm2d(num_features = block_out_channels,
-                           eps          = CONFIG.RESBLOCK.BN.EPS,
-                           momentum     = CONFIG.RESBLOCK.BN.MOMENTUM,),
+                           eps          = config.BN.EPS,
+                           momentum     = config.BN.MOMENTUM,),
         )
 
         self.res_conv = None
@@ -109,13 +142,13 @@ class ResBlock(nn.Module):
                 conv2d(block_in_channels,
                        block_out_channels,
                        kernel_size = 1,
-                       stride      = mid_conv_stride if CONFIG.USES_RES_V1p5 else in_conv_stride,),
+                       stride      = mid_conv_stride if config.USES_RES_V1p5 else in_conv_stride,),
                 nn.BatchNorm2d(num_features = block_out_channels,
-                               eps          = CONFIG.RESBLOCK.BN.EPS,
-                               momentum     = CONFIG.RESBLOCK.BN.MOMENTUM,),
+                               eps          = config.BN.EPS,
+                               momentum     = config.BN.MOMENTUM,),
             )
 
-        self.relu = nn.ReLU(inplace = CONFIG.RESBLOCK.RELU_INPLACE)
+        self.relu = nn.ReLU(inplace = config.RELU_INPLACE)
 
 
     def forward(self, x):
@@ -140,7 +173,14 @@ class ResStage(nn.Module):
     Block means a res block.
     """
 
-    def __init__(self, stage_in_channels, stage_out_channels, num_blocks, mid_conv_channels, mid_conv_groups, in_conv_stride = 1, mid_conv_stride = 1):
+    def __init__(self, stage_in_channels,
+                       stage_out_channels,
+                       num_blocks,
+                       mid_conv_channels,
+                       mid_conv_groups,
+                       in_conv_stride  = 1,
+                       mid_conv_stride = 1,
+                       config          = None):
         super().__init__()
 
         # Process all blocks sequentially...
@@ -156,6 +196,9 @@ class ResStage(nn.Module):
                 # First block uses in_conv_stride and rest uses 1...
                 in_conv_stride     = in_conv_stride    if block_idx == 0 else 1,
                 mid_conv_stride    = mid_conv_stride   if block_idx == 0 else 1,
+
+                # Other config...
+                config = config
             )
             for block_idx in range(num_blocks)
         ])
@@ -180,11 +223,31 @@ class ResNet50(nn.Module):
     be processed sequentially.
     """
 
-    def __init__(self):
+    @staticmethod
+    def get_default_config():
+        CONFIG = Configurator()
+        with CONFIG.enable_auto_create():
+            CONFIG.RESSTEM.BN.EPS       = 1e-5
+            CONFIG.RESSTEM.BN.MOMENTUM  = 1e-1
+            CONFIG.RESSTEM.RELU_INPLACE = False
+
+            CONFIG.RESSTAGE.BN.EPS       = 1e-5
+            CONFIG.RESSTAGE.BN.MOMENTUM  = 1e-1
+            CONFIG.RESSTAGE.RELU_INPLACE = False
+            CONFIG.RESSTAGE.USES_RES_V1p5 = True
+
+            CONFIG.USES_RES_V1p5 = True
+
+        return CONFIG
+
+
+    def __init__(self, config = None):
         super().__init__()
 
+        if config is None: config = ResNet50.get_default_config()
+
         # [[[ STEM ]]]
-        self.stem = ResStem(stem_in_channels = 1, stem_out_channels = 64)
+        self.stem = ResStem(stem_in_channels = 1, stem_out_channels = 64, config = config.RESSTEM)
 
         # [[[ Layer 1 ]]]
         stage_in_channels  = 64
@@ -202,7 +265,8 @@ class ResNet50(nn.Module):
                         mid_conv_channels  = mid_conv_channels,
                         mid_conv_groups    = 1,
                         in_conv_stride     = in_conv_stride,
-                        mid_conv_stride    = mid_conv_stride,)
+                        mid_conv_stride    = mid_conv_stride,
+                        config             = config.RESSTAGE,)
             for stage_idx in range(num_stages) ]
         )
 
@@ -212,8 +276,8 @@ class ResNet50(nn.Module):
         mid_conv_channels  = 128
         num_stages         = 1
         num_blocks         = 4
-        in_conv_stride     = 1 if CONFIG.USES_RES_V1p5 else 2
-        mid_conv_stride    = 2 if CONFIG.USES_RES_V1p5 else 1
+        in_conv_stride     = 1 if config.USES_RES_V1p5 else 2
+        mid_conv_stride    = 2 if config.USES_RES_V1p5 else 1
         self.layer2 = nn.Sequential(*[
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
@@ -221,7 +285,8 @@ class ResNet50(nn.Module):
                      mid_conv_channels  = mid_conv_channels,
                      mid_conv_groups    = 1,
                      in_conv_stride     = in_conv_stride,
-                     mid_conv_stride    = mid_conv_stride,)
+                     mid_conv_stride    = mid_conv_stride,
+                     config             = config.RESSTAGE,)
             for stage_idx in range(num_stages)
         ])
 
@@ -231,8 +296,8 @@ class ResNet50(nn.Module):
         mid_conv_channels  = 256
         num_stages         = 1
         num_blocks         = 6
-        in_conv_stride     = 1 if CONFIG.USES_RES_V1p5 else 2
-        mid_conv_stride    = 2 if CONFIG.USES_RES_V1p5 else 1
+        in_conv_stride     = 1 if config.USES_RES_V1p5 else 2
+        mid_conv_stride    = 2 if config.USES_RES_V1p5 else 1
         self.layer3 = nn.Sequential(*[
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
@@ -240,7 +305,8 @@ class ResNet50(nn.Module):
                      mid_conv_channels  = mid_conv_channels,
                      mid_conv_groups    = 1,
                      in_conv_stride     = in_conv_stride,
-                     mid_conv_stride    = mid_conv_stride,)
+                     mid_conv_stride    = mid_conv_stride,
+                     config             = config.RESSTAGE,)
             for stage_idx in range(num_stages)
         ])
 
@@ -250,8 +316,8 @@ class ResNet50(nn.Module):
         mid_conv_channels  = 512
         num_stages         = 1
         num_blocks         = 3
-        in_conv_stride     = 1 if CONFIG.USES_RES_V1p5 else 2
-        mid_conv_stride    = 2 if CONFIG.USES_RES_V1p5 else 1
+        in_conv_stride     = 1 if config.USES_RES_V1p5 else 2
+        mid_conv_stride    = 2 if config.USES_RES_V1p5 else 1
         self.layer4 = nn.Sequential(*[
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
@@ -259,7 +325,8 @@ class ResNet50(nn.Module):
                      mid_conv_channels  = mid_conv_channels,
                      mid_conv_groups    = 1,
                      in_conv_stride     = in_conv_stride,
-                     mid_conv_stride    = mid_conv_stride,)
+                     mid_conv_stride    = mid_conv_stride,
+                     config             = config.RESSTAGE,)
             for stage_idx in range(num_stages)
         ])
 
