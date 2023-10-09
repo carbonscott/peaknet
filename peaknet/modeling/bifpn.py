@@ -2,7 +2,7 @@ import torch
 import torch.nn            as nn
 import torch.nn.functional as F
 
-from ..config import CONFIG
+from ..configurator import Configurator
 
 from .blocks import conv2d, pool2d
 
@@ -73,8 +73,24 @@ class BiFPNBlock(nn.Module):
     which can be achieved with a conv layer in the upstream.
     """
 
-    def __init__(self, num_features = 64, num_levels = 5):
+    @staticmethod
+    def get_default_config():
+        CONFIG = Configurator()
+        with CONFIG.enable_auto_create():
+            CONFIG.BN.EPS            = 1e-5
+            CONFIG.BN.MOMENTUM       = 1e-1
+            CONFIG.RELU_INPLACE      = False
+            CONFIG.DOWN_SCALE_FACTOR = 0.5
+            CONFIG.UP_SCALE_FACTOR   = 2
+            CONFIG.FUSION.EPS        = 1e-5
+
+        return CONFIG
+
+
+    def __init__(self, num_features = 64, num_levels = 5, config = None):
         super().__init__()
+
+        if config is None: config = BiFPNBlock.get_default_config()
 
         # Follow the paper's notation with base level starting from "3"...
         BASE_LEVEL = 3
@@ -94,8 +110,8 @@ class BiFPNBlock(nn.Module):
                                          out_channels = num_features,
                                          bias         = False),
                 nn.BatchNorm2d(num_features = num_features,
-                               eps          = CONFIG.BIFPN.BN.EPS,
-                               momentum     = CONFIG.BIFPN.BN.MOMENTUM),
+                               eps          = config.BN.EPS,
+                               momentum     = config.BN.MOMENTUM),
                 nn.ReLU(),
             )
             for level in range(min_level, max_level)
@@ -109,8 +125,8 @@ class BiFPNBlock(nn.Module):
                                          out_channels = num_features,
                                          bias         = False),
                 nn.BatchNorm2d(num_features = num_features,
-                               eps          = CONFIG.BIFPN.BN.EPS,
-                               momentum     = CONFIG.BIFPN.BN.MOMENTUM),
+                               eps          = config.BN.EPS,
+                               momentum     = config.BN.MOMENTUM),
                 nn.ReLU(),
             )
             for level in range(min_level + 1, max_level + 1)
@@ -154,11 +170,11 @@ class BiFPNBlock(nn.Module):
 
             w1, w2 = self.w_m[idx]
             m_low_up = F.interpolate(m_low,
-                                     scale_factor  = CONFIG.BIFPN.UP_SCALE_FACTOR,
+                                     scale_factor  = config.UP_SCALE_FACTOR,
                                      mode          = 'bilinear',
                                      align_corners = False)
             m_fused  = w1 * p_high + w2 * m_low_up
-            m_fused /= (w1 + w2 + CONFIG.BIFPN.FUSION.EPS)
+            m_fused /= (w1 + w2 + config.FUSION.EPS)
             m_fused  = self.conv[f"m{level_high}"](m_fused)
 
             m[level_high] = m_fused
@@ -174,11 +190,11 @@ class BiFPNBlock(nn.Module):
 
             w1, w2, w3 = self.w_q[idx]
             q_high_up = F.interpolate(q_high,
-                                      scale_factor  = CONFIG.BIFPN.DOWN_SCALE_FACTOR,
+                                      scale_factor  = config.DOWN_SCALE_FACTOR,
                                       mode          = 'bilinear',
                                       align_corners = False)
             q_fused  = w1 * p_low + w2 * m_low + w3 * q_high_up
-            q_fused /= (w1 + w2 + w3 + CONFIG.BIFPN.FUSION.EPS)
+            q_fused /= (w1 + w2 + w3 + config.FUSION.EPS)
             q_fused  = self.conv[f"q{level_low}"](q_fused)
 
             if idx == 0: q[level_high] = q_high
@@ -194,12 +210,29 @@ class BiFPN(nn.Module):
     This class provides a series of BiFPN blocks.
     """
 
-    def __init__(self, num_blocks = 1, num_features = 64, num_levels = 5):
+    @staticmethod
+    def get_default_config():
+        CONFIG = Configurator()
+        with CONFIG.enable_auto_create():
+            CONFIG.BN.EPS            = 1e-5
+            CONFIG.BN.MOMENTUM       = 1e-1
+            CONFIG.RELU_INPLACE      = False
+            CONFIG.DOWN_SCALE_FACTOR = 0.5
+            CONFIG.UP_SCALE_FACTOR   = 2
+            CONFIG.FUSION.EPS        = 1e-5
+
+        return CONFIG
+
+
+    def __init__(self, num_blocks = 1, num_features = 64, num_levels = 5, config = None):
         super().__init__()
+
+        if config is None: config = BiFPN.get_default_config()
 
         self.blocks = nn.Sequential(*[
             BiFPNBlock(num_features = num_features,
-                       num_levels = num_levels)
+                       num_levels   = num_levels,
+                       config       = config,)
             for block_idx in range(num_blocks)
         ])
 
@@ -213,6 +246,7 @@ class BiFPN(nn.Module):
 #####################################################################
 # RAW BIFPN IMPLEMENTATION BELOW IS FOR LEARNING/DEBUGGING PURPOSES #
 #####################################################################
+'''
 class BiFPNBlockEDU(nn.Module):
     """
     !!!
@@ -355,3 +389,4 @@ class BiFPNBlockEDU(nn.Module):
         q7  = self.conv.q7(q7)
 
         return q3, q4, q5, q6, q7
+'''
