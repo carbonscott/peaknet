@@ -1,20 +1,40 @@
 import torch
 import torch.nn as nn
 
-from ..config import CONFIG
+from ..configurator import Configurator
 
 from .regnet import ResNet50
 
 
 class ImageEncoder(nn.Module):
 
-    def __init__(self, saves_feature_per_layer = True):
+    @staticmethod
+    def get_default_config():
+        CONFIG = Configurator()
+        with CONFIG.enable_auto_create():
+            CONFIG.RESSTEM.BN.EPS       = 1e-5
+            CONFIG.RESSTEM.BN.MOMENTUM  = 1e-1
+            CONFIG.RESSTEM.RELU_INPLACE = False
+
+            CONFIG.RESSTAGE.BN.EPS       = 1e-5
+            CONFIG.RESSTAGE.BN.MOMENTUM  = 1e-1
+            CONFIG.RESSTAGE.RELU_INPLACE = False
+            CONFIG.RESSTAGE.USES_RES_V1p5 = True
+
+            CONFIG.USES_RES_V1p5 = True
+
+        return CONFIG
+
+
+    def __init__(self, saves_feature_per_layer = True, config = None):
         super().__init__()
+
+        if config is None: config = ImageEncoder.get_default_config()
 
         self.saves_feature_per_layer = saves_feature_per_layer
 
         # Use the ResNet50 as the encoder...
-        self.encoder = ResNet50()
+        self.encoder = ResNet50(config = config)
 
 
     def forward(self, x):
