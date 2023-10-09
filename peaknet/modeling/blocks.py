@@ -6,8 +6,6 @@ import torch
 import torch.nn            as nn
 import torch.nn.functional as F
 
-from ..config import CONFIG
-
 
 def conv2d(in_channels, out_channels, kernel_size, *, stride = 1, groups = 1, bias = False):    # ...`*` forces the rest arguments to be keyword arguments
     """Helper for building a conv2d layer."""
