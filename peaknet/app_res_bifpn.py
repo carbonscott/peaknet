@@ -14,7 +14,7 @@ from cupyx.scipy import ndimage
 
 from .modeling.reg_bifpn_net import PeakNet
 
-from .trans import coord_crop_to_img, center_crop
+## from .trans import coord_crop_to_img, center_crop
 
 from .configurator import Configurator
 
@@ -33,14 +33,14 @@ class PeakFinder:
 
 
     def __init__(self, path_chkpt = None, path_cheetah_geom = None, config = None):
-        if config is None: config = PeakFinder.get_default_config()
+        self.config = PeakFinder.get_default_config() if config is None else config
 
         # Set up default path to load default files...
         default_path = os.path.dirname(__file__)
 
         # [[[ MODEL ]]]
         # Create model...
-        self.model, self.device = self.config_model(config = config.MODEL)
+        self.model, self.device = self.config_model(config = self.config.MODEL)
 
         # Load weights...
         if path_chkpt is not None:
@@ -225,9 +225,9 @@ class PeakFinder:
         # Convert to probability with the softmax function...
         mask_stack_predicted = fmap_stack.softmax(dim = 1)
 
-        # Guarantee image and prediction mask have the same size...
-        size_y, size_x = img_stack.shape[-2:]
-        mask_stack_predicted = center_crop(mask_stack_predicted, size_y, size_x, returns_offset_tuple = False)
+        ## # Guarantee image and prediction mask have the same size...
+        ## size_y, size_x = img_stack.shape[-2:]
+        ## mask_stack_predicted = center_crop(mask_stack_predicted, size_y, size_x, returns_offset_tuple = False)
 
         B, C, H, W = mask_stack_predicted.shape
         mask_stack_predicted = mask_stack_predicted.argmax(dim = 1, keepdims = True)
@@ -246,7 +246,7 @@ class PeakFinder:
                 idx_panel, y, x = peak_pos
                 idx_panel = int(idx_panel)
 
-                y, x = coord_crop_to_img((y, x), img_stack.shape[-2:], label_predicted.shape[-2:])
+                ## y, x = coord_crop_to_img((y, x), img_stack.shape[-2:], label_predicted.shape[-2:])
 
                 if uses_geom:
                     x_min, y_min, x_max, y_max = self.cheetah_geom_list[idx_panel]
