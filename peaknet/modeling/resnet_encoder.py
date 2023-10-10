@@ -28,7 +28,6 @@ class ImageEncoder(nn.Module):
     def __init__(self, config = None):
         super().__init__()
 
-        if config is None: config = ImageEncoder.get_default_config()
         self.config = ImageEncoder.get_default_config() if config is None else config
 
         # Use the ResNet50 as the encoder...
