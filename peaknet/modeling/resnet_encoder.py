@@ -12,13 +12,7 @@ class ImageEncoder(nn.Module):
     def get_default_config():
         CONFIG = Configurator()
         with CONFIG.enable_auto_create():
-            CONFIG.RESSTEM.BN.EPS         = 1e-5
-            CONFIG.RESSTEM.BN.MOMENTUM    = 1e-1
-            CONFIG.RESSTEM.RELU_INPLACE   = False
-            CONFIG.RESSTAGE.BN.EPS        = 1e-5
-            CONFIG.RESSTAGE.BN.MOMENTUM   = 1e-1
-            CONFIG.RESSTAGE.RELU_INPLACE  = False
-            CONFIG.RESSTAGE.USES_RES_V1p5 = True
+            CONFIG = ResNet50.get_default_config()
 
             CONFIG.SAVES_FEATURE_AT_LAYER = {
                 "stem"   : True,
@@ -27,8 +21,6 @@ class ImageEncoder(nn.Module):
                 "layer3" : True,
                 "layer4" : True,
             }
-
-            CONFIG.USES_RES_V1p5 = True
 
         return CONFIG
 
