@@ -1,9 +1,10 @@
 CHKPT:
-  TIMESTAMP_PREV  : null
-  EPOCH_PREV      : null
-  DIRECTORY       : chkpts
-  PRETRAIN        : "pretrained_chkpts/transfered_weights.resnet50.chkpt"
-  FILENAME_PREFIX : null
+  DIRECTORY           : chkpts
+  FILENAME_PREFIX     : null
+  PATH_CHKPT_PREV     : null
+  PRETRAIN            : "pretrained_chkpts/transfered_weights.resnet50.chkpt"
+  CHKPT_SAVING_PERIOD : 5
+  EPOCH_UNSTABLE_END  : 40
 
 DATASET:
   PATH           : "datasets/mfx13016_0028_N68+mfxp22820_0013_N37+mfx13016_0028_N63_low_photon.68v37v30.data.label_corrected.npy"
@@ -15,9 +16,10 @@ DATASET:
 
 MODEL:
   BIFPN:
-    NUM_BLOCKS   : 1
+    NUM_BLOCKS   : 3
     NUM_FEATURES : 64
-  FREEZES_BACKBONE : false
+    NUM_LEVELS   : 3
+  FREEZES_BACKBONE    : false
   USES_RANDOM_WEIGHTS : false
 
 LOSS:
@@ -31,7 +33,11 @@ OPTIM:
   GRAD_CLIP    : 1.0
 
 LR_SCHEDULER:
-  PATIENCE : 10
+  ## PATIENCE : 10
+  WARMUP_EPOCHS : 5
+  TOTAL_EPOCHS  : 500
+  MIN_LR        : 1e-7
+  USES_PREV     : true
 
 DDP:
   BACKEND                : nccl
@@ -44,4 +50,5 @@ LOGGING:
 MISC:
   USES_MIXED_PRECISION : true
   MAX_EPOCHS           : 150
-  NUM_GPUS             : 4
+  NUM_NODES            : 1
+  NUM_GPUS             : 2

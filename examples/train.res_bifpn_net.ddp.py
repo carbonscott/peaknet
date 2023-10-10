@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+## from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # Libraries used for Distributed Data Parallel (DDP)
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -24,6 +24,7 @@ from peaknet.modeling.reg_bifpn_net import PeakNet
 from peaknet.criterion              import CategoricalFocalLoss
 from peaknet.utils                  import init_logger, split_dataset, save_checkpoint, load_checkpoint, set_seed, init_weights
 from peaknet.configurator           import Configurator
+from peaknet.lr_scheduler           import CosineLRScheduler
 
 from peaknet.trans import RandomShift,  \
                           RandomRotate, \
@@ -50,11 +51,12 @@ with open(fl_yaml, 'r') as fh:
 CONFIG = Configurator.from_dict(config_dict)
 
 # ...Checkpoint
-timestamp_prev      = CONFIG.CHKPT.TIMESTAMP_PREV
-epoch_prev          = CONFIG.CHKPT.EPOCH_PREV
 drc_chkpt           = CONFIG.CHKPT.DIRECTORY
 path_pretrain_chkpt = CONFIG.CHKPT.PRETRAIN
 fl_chkpt_prefix     = CONFIG.CHKPT.FILENAME_PREFIX
+path_chkpt_prev     = CONFIG.CHKPT.PATH_CHKPT_PREV
+chkpt_saving_period = CONFIG.CHKPT.CHKPT_SAVING_PERIOD
+epoch_unstable_end  = CONFIG.CHKPT.EPOCH_UNSTABLE_END
 
 # ...Dataset
 path_dataset  = CONFIG.DATASET.PATH
@@ -80,7 +82,12 @@ weight_decay = float(CONFIG.OPTIM.WEIGHT_DECAY)
 grad_clip    = float(CONFIG.OPTIM.GRAD_CLIP)
 
 # ...Scheduler
-patience = CONFIG.LR_SCHEDULER.PATIENCE
+## patience            = CONFIG.LR_SCHEDULER.PATIENCE
+warmup_epochs       = CONFIG.LR_SCHEDULER.WARMUP_EPOCHS
+total_epochs        = CONFIG.LR_SCHEDULER.TOTAL_EPOCHS
+min_lr              = float(CONFIG.LR_SCHEDULER.MIN_LR)
+uses_prev_scheduler = CONFIG.LR_SCHEDULER.USES_PREV
+
 
 # ...DDP
 ddp_backend            = CONFIG.DDP.BACKEND
@@ -128,10 +135,6 @@ seed_offset = ddp_rank if uses_unique_world_seed else 0
 
 
 # [[[ USE YAML CONFIG TO INITIALIZE HYPERPARAMETERS ]]]
-# ...Checkpoint
-fl_chkpt_prev   = None if timestamp_prev is None else f"{timestamp_prev}.epoch_{epoch_prev}.chkpt"
-path_chkpt_prev = None if fl_chkpt_prev is None else os.path.join(drc_chkpt, fl_chkpt_prev)
-
 # Set Seed
 base_seed   = 0
 world_seed  = base_seed + seed_offset
@@ -241,12 +244,16 @@ param_iter = model.module.parameters() if hasattr(model, "module") else model.pa
 optimizer = optim.AdamW(param_iter,
                         lr = lr,
                         weight_decay = weight_decay)
-scheduler = ReduceLROnPlateau(optimizer, mode           = 'min',
-                                         factor         = 2e-1,
-                                         patience       = patience,
-                                         threshold      = 1e-4,
-                                         threshold_mode ='rel',
-                                         verbose        = True)
+scheduler = CosineLRScheduler(optimizer     = optimizer,
+                              warmup_epochs = warmup_epochs,
+                              total_epochs  = total_epochs,
+                              min_lr        = min_lr)
+## scheduler = ReduceLROnPlateau(optimizer, mode           = 'min',
+##                                          factor         = 2e-1,
+##                                          patience       = patience,
+##                                          threshold      = 1e-4,
+##                                          threshold_mode ='rel',
+##                                          verbose        = True)
 
 
 # [[[ TRAIN LOOP ]]]
@@ -254,7 +261,10 @@ scheduler = ReduceLROnPlateau(optimizer, mode           = 'min',
 epoch_min = 0
 loss_min  = float('inf')
 if path_chkpt_prev is not None:
-    epoch_min, loss_min = load_checkpoint(model, optimizer, scheduler, path_chkpt_prev)
+    epoch_min, loss_min = load_checkpoint(model,
+                                          optimizer,
+                                          scheduler if uses_prev_scheduler else None,
+                                          path_chkpt_prev)
     ## epoch_min, loss_min = load_checkpoint(model, None, None, path_chkpt_prev)
     epoch_min += 1    # Next epoch
     logger.info(f"PREV - epoch_min = {epoch_min}, loss_min = {loss_min}")
@@ -280,7 +290,7 @@ try:
         model.train()
 
         # Fetch batches...
-        batch_train     = tqdm.tqdm(enumerate(dataloader_train), total = len(dataloader_train))
+        batch_train  = tqdm.tqdm(enumerate(dataloader_train), total = len(dataloader_train))
         train_loss   = torch.zeros(len(batch_train)).to(device).float()
         train_sample = torch.zeros(len(batch_train)).to(device).float()
         for batch_idx, batch_entry in batch_train:
@@ -295,12 +305,13 @@ try:
                     # Forward pass...
                     batch_output = model(batch_input)
 
-                    # Crop the target mask as u-net might change the output dimension...
-                    size_y, size_x = batch_output.shape[-2:]
-                    batch_target_crop = center_crop(batch_target, size_y, size_x)
+                    ## # Crop the target mask as u-net might change the output dimension...
+                    ## size_y, size_x = batch_output.shape[-2:]
+                    ## batch_target_crop = center_crop(batch_target, size_y, size_x)
 
                     # Calculate the loss...
-                    loss = criterion(batch_output, batch_target_crop)
+                    ## loss = criterion(batch_output, batch_target_crop)
+                    loss = criterion(batch_output, batch_target)
                     loss = loss.mean()
 
                 # Backward pass and optimization...
@@ -315,12 +326,13 @@ try:
                 # Forward pass...
                 batch_output = model(batch_input)
 
-                # Crop the target mask even if the output dimension size is changed...
-                size_y, size_x = batch_output.shape[-2:]
-                batch_target_crop = center_crop(batch_target, size_y, size_x)
+                ## # Crop the target mask even if the output dimension size is changed...
+                ## size_y, size_x = batch_output.shape[-2:]
+                ## batch_target_crop = center_crop(batch_target, size_y, size_x)
 
                 # Calculate the loss...
-                loss = criterion(batch_output, batch_target_crop)
+                ## loss = criterion(batch_output, batch_target_crop)
+                loss = criterion(batch_output, batch_target)
                 loss = loss.mean()
 
                 # Backward pass and optimization...
@@ -357,7 +369,7 @@ try:
         model.eval()
 
         # Fetch batches...
-        batch_validate = tqdm.tqdm(enumerate(dataloader_validate), total = len(dataloader_validate))
+        batch_validate  = tqdm.tqdm(enumerate(dataloader_validate), total = len(dataloader_validate))
         validate_loss   = torch.zeros(len(batch_validate)).to(device).float()
         validate_sample = torch.zeros(len(batch_validate)).to(device).float()
         for batch_idx, batch_entry in batch_validate:
@@ -373,23 +385,25 @@ try:
                         # Forward pass...
                         batch_output = model(batch_input)
 
-                        # Crop the target mask as u-net might change the output dimension...
-                        size_y, size_x = batch_output.shape[-2:]
-                        batch_target_crop = center_crop(batch_target, size_y, size_x)
+                        ## # Crop the target mask as u-net might change the output dimension...
+                        ## size_y, size_x = batch_output.shape[-2:]
+                        ## batch_target_crop = center_crop(batch_target, size_y, size_x)
 
                         # Calculate the loss...
-                        loss = criterion(batch_output, batch_target_crop)
+                        ## loss = criterion(batch_output, batch_target_crop)
+                        loss = criterion(batch_output, batch_target)
                         loss = loss.mean()
                 else:
                     # Forward pass...
                     batch_output = model(batch_input)
 
-                    # Crop the target mask as u-net might change the output dimension...
-                    size_y, size_x = batch_output.shape[-2:]
-                    batch_target_crop = center_crop(batch_target, size_y, size_x)
+                    ## # Crop the target mask as u-net might change the output dimension...
+                    ## size_y, size_x = batch_output.shape[-2:]
+                    ## batch_target_crop = center_crop(batch_target, size_y, size_x)
 
                     # Calculate the loss...
-                    loss = criterion(batch_output, batch_target_crop)
+                    ## loss = criterion(batch_output, batch_target_crop)
+                    loss = criterion(batch_output, batch_target)
                     loss = loss.mean()
 
             # Reporting...
@@ -419,7 +433,7 @@ try:
             logger.info(f"MSG (device:{device}) - epoch {epoch}, lr used = {lr_used}")
 
         # Update learning rate in the scheduler...
-        scheduler.step(world_validate_loss_mean)
+        scheduler.step()
 
 
         # ___/ SAVE CHECKPOINT??? \___
