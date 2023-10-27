@@ -99,10 +99,8 @@ with h5py.File(path_cxi, 'r') as fh:
     batch_segmask = batch_segmask[:, panel_enum_list] # (B, N, H, W)
     batch_segmask = batch_segmask.reshape(-1, H, W)   # (B*N, H, W)
 
-    batch_img[batch_segmask == bad_pixel_label] = 0.0
-
-    ## # Compiple image and segmask...
-    ## data = np.concatenate((batch_img, batch_segmask), axis = 1)    # (B*N, 2, 1, H, W)
+    batch_img    [batch_segmask == bad_pixel_label] = 0.0
+    batch_segmask[batch_segmask == bad_pixel_label] = 0
 
 # Save...
 B, H, W = batch_img.shape
