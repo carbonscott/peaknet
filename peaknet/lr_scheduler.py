@@ -1,8 +1,8 @@
-from torch.optim.lr_scheduler import LRScheduler
+from torch.optim.lr_scheduler import _LRScheduler
 
 import math
 
-class CosineLRScheduler(LRScheduler):
+class CosineLRScheduler(_LRScheduler):
     def __init__(self, optimizer, warmup_epochs, total_epochs, min_lr=0, last_epoch=-1):
         self.warmup_epochs = warmup_epochs
         self.total_epochs = total_epochs
