@@ -41,7 +41,7 @@ class PeakNet(nn.Module):
         return CONFIG
 
 
-    def __init__(self, num_blocks = 1, num_features = 64, config = None):
+    def __init__(self, num_blocks = 1, num_features = 64, num_levels, config = None):
         super().__init__()
 
         self.config = PeakNet.get_default_config() if config is None else config
@@ -51,18 +51,18 @@ class PeakNet(nn.Module):
 
         # Create the adapter layer between encoder and bifpn...
         self.backbone_to_bifpn = nn.ModuleList([
-            DepthwiseSeparableConv2d(in_channels  = in_channels,
-                                     out_channels = num_features,
-                                     kernel_size  = 1,
-                                     stride       = 1,
-                                     padding      = 0)
+            nn.Conv2d(in_channels  = in_channels,
+                      out_channels = num_features,
+                      kernel_size  = 1,
+                      stride       = 1,
+                      padding      = 0)
             for _, in_channels in self.config.BACKBONE.OUTPUT_CHANNELS.items()
         ])
 
         # Create the fusion blocks...
         self.bifpn = BiFPN(num_blocks   = num_blocks,
                            num_features = num_features,
-                           num_levels   = len(self.config.BACKBONE.OUTPUT_CHANNELS),
+                           num_levels   = num_levels,
                            config       = self.config.BIFPN,)
 
         # Create the prediction head...
