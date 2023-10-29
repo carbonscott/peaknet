@@ -41,7 +41,7 @@ class PeakNet(nn.Module):
         return CONFIG
 
 
-    def __init__(self, num_blocks = 1, num_features = 64, num_levels, config = None):
+    def __init__(self, num_blocks = 1, num_features = 64, num_levels = 3, config = None):
         super().__init__()
 
         self.config = PeakNet.get_default_config() if config is None else config
