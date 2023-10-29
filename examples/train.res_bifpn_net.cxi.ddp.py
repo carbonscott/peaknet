@@ -71,6 +71,7 @@ num_workers   = CONFIG.DATASET.NUM_WORKERS
 # ...Model
 num_bifpn_blocks    = CONFIG.MODEL.BIFPN.NUM_BLOCKS
 num_bifpn_features  = CONFIG.MODEL.BIFPN.NUM_FEATURES
+num_bifpn_levels    = CONFIG.MODEL.BIFPN.NUM_LEVELS
 freezes_backbone    = CONFIG.MODEL.FREEZES_BACKBONE
 uses_random_weights = CONFIG.MODEL.USES_RANDOM_WEIGHTS
 
@@ -213,7 +214,9 @@ dataloader_validate = torch.utils.data.DataLoader( dataset_validate,
 
 # [[[ MODEL ]]]
 # Use the model architecture -- regnet + bifpn...
-model = PeakNet(num_blocks = num_bifpn_blocks, num_features = num_bifpn_features)
+model = PeakNet(num_blocks   = num_bifpn_blocks,
+                num_features = num_bifpn_features,
+                num_levels   = num_bifpn_levels,)
 model.to(device)
 if ddp_rank == 0:
     print(f"{sum(p.numel() for p in model.parameters())/1e6} M pamameters.")
@@ -280,8 +283,6 @@ if ddp_rank == 0:
     print(f"Current timestamp: {timestamp}")
 
 try:
-    chkpt_saving_period = 1
-    epoch_unstable_end  = -1
     for epoch in tqdm.tqdm(range(max_epochs)):
         epoch += epoch_min
 
