@@ -16,7 +16,7 @@ class PeakNet(nn.Module):
         with CONFIG.enable_auto_create():
             CONFIG.BACKBONE = ImageEncoder.get_default_config()
             CONFIG.BACKBONE.OUTPUT_CHANNELS = {
-                "stem"   : 64,
+                ## "stem"   : 64,
                 "layer1" : 256,
                 "layer2" : 512,
                 "layer3" : 1024,
@@ -26,14 +26,14 @@ class PeakNet(nn.Module):
             CONFIG.BIFPN = BiFPN.get_default_config()
 
             CONFIG.SEG_HEAD.UP_SCALE_FACTOR = [
-                2,  # stem
+                ## 2,  # stem
                 4,  # layer1
                 8,  # layer2
                 16, # layer3
                 32, # layer4
             ]
-            CONFIG.SEG_HEAD.Q3_UP_SCALE_FACTOR = 2
-            CONFIG.SEG_HEAD.Q3_IN_CHANNELS     = 64
+            CONFIG.SEG_HEAD.Q3_UP_SCALE_FACTOR = 4
+            CONFIG.SEG_HEAD.Q3_IN_CHANNELS     = 256
             CONFIG.SEG_HEAD.FUSE_IN_CHANNELS   = 64 * 5
             CONFIG.SEG_HEAD.OUT_CHANNELS       = 3
             CONFIG.SEG_HEAD.USES_Q3            = True
@@ -41,7 +41,7 @@ class PeakNet(nn.Module):
         return CONFIG
 
 
-    def __init__(self, num_blocks = 1, num_features = 64, num_levels = 3, config = None):
+    def __init__(self, num_blocks = 1, num_features = 256, num_levels = 4, base_level = 2, config = None):
         super().__init__()
 
         self.config = PeakNet.get_default_config() if config is None else config
@@ -60,10 +60,11 @@ class PeakNet(nn.Module):
         ])
 
         # Create the fusion blocks...
-        self.bifpn = BiFPN(num_blocks   = num_blocks,
-                           num_features = num_features,
-                           num_levels   = num_levels,
-                           config       = self.config.BIFPN,)
+        self.config.BIFPN.NUM_BLOCKS   = num_blocks
+        self.config.BIFPN.NUM_FEATURES = num_features
+        self.config.BIFPN.NUM_LEVELS   = num_levels
+        self.config.BIFPN.BASE_LEVEL   = base_level
+        self.bifpn = BiFPN(config = self.config.BIFPN)
 
         # Create the prediction head...
         in_channels  = self.config.SEG_HEAD.Q3_IN_CHANNELS if self.config.SEG_HEAD.USES_Q3 else \
