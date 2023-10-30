@@ -69,9 +69,11 @@ size_batch    = CONFIG.DATASET.BATCH_SIZE
 num_workers   = CONFIG.DATASET.NUM_WORKERS
 
 # ...Model
-num_bifpn_blocks    = CONFIG.MODEL.BIFPN.NUM_BLOCKS
-num_bifpn_features  = CONFIG.MODEL.BIFPN.NUM_FEATURES
-num_bifpn_levels    = CONFIG.MODEL.BIFPN.NUM_LEVELS
+bifpn_num_blocks    = CONFIG.MODEL.BIFPN.NUM_BLOCKS
+bifpn_num_features  = CONFIG.MODEL.BIFPN.NUM_FEATURES
+bifpn_num_levels    = CONFIG.MODEL.BIFPN.NUM_LEVELS
+bifpn_base_level    = CONFIG.MODEL.BIFPN.NUM_LEVELS
+seghead_num_classes = CONFIG.MODEL.SEG_HEAD.NUM_CLASSES
 freezes_backbone    = CONFIG.MODEL.FREEZES_BACKBONE
 uses_random_weights = CONFIG.MODEL.USES_RANDOM_WEIGHTS
 
@@ -214,9 +216,13 @@ dataloader_validate = torch.utils.data.DataLoader( dataset_validate,
 
 # [[[ MODEL ]]]
 # Use the model architecture -- regnet + bifpn...
-model = PeakNet(num_blocks   = num_bifpn_blocks,
-                num_features = num_bifpn_features,
-                num_levels   = num_bifpn_levels,)
+peaknet_config = PeakNet.get_default_config()
+peaknet_config.BIFPN.NUM_BLOCKS     = bifpn_num_blocks
+peaknet_config.BIFPN.NUM_FEATURES   = bifpn_num_features
+peaknet_config.BIFPN.NUM_LEVELS     = bifpn_num_levels
+peaknet_config.BIFPN.BASE_LEVEL     = bifpn_base_level
+peaknet_config.SEG_HEAD.NUM_CLASSES = seghead_num_classes
+model = PeakNet(peaknet_config)
 model.to(device)
 if ddp_rank == 0:
     print(f"{sum(p.numel() for p in model.parameters())/1e6} M pamameters.")
@@ -247,7 +253,9 @@ if uses_ddp:
 
 
 # [[[ CRITERION ]]]
-criterion = CategoricalFocalLoss(alpha = focal_alpha, gamma = focal_gamma)
+criterion = CategoricalFocalLoss(alpha       = focal_alpha,
+                                 gamma       = focal_gamma,
+                                 num_classes = seghead_num_classes,)
 
 # [[[ OPTIMIZER ]]]
 param_iter = model.module.parameters() if hasattr(model, "module") else model.parameters()
