@@ -4,6 +4,8 @@ import logging
 
 from torch.utils.data import Dataset
 
+from ..configurator import Configurator
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,13 +60,26 @@ class SFXDataset(Dataset):
 
 
 class SFXMulticlassDataset(Dataset):
+
+    @staticmethod
+    def get_default_config():
+        CONFIG = Configurator()
+        with CONFIG.enable_auto_create():
+            CONFIG.NUM_CLASSES = 3
+
+        return CONFIG
+
+
     def __init__(self, data_list, size_sample, trans_list         = None,
                                                normalizes_data    = False,
                                                reverse_bg         = False,
                                                prints_cache_state = False,
                                                uses_frac_center   = False,
-                                               mpi_comm           = None,):
+                                               mpi_comm           = None,
+                                               config             = None,):
         super().__init__()
+
+        self.config = SFXMulticlassDataset.get_default_config() if config is None else config
 
         self.data_list          = data_list
         self.size_sample        = size_sample
