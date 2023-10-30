@@ -15,7 +15,7 @@ class ImageEncoder(nn.Module):
             CONFIG = ResNet50.get_default_config()
 
             CONFIG.SAVES_FEATURE_AT_LAYER = {
-                "stem"   : True,
+                "stem"   : False,
                 "layer1" : True,
                 "layer2" : True,
                 "layer3" : True,
