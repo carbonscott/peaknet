@@ -2,10 +2,55 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from math import log
+
 from ..configurator import Configurator
 
 from .resnet_encoder import ImageEncoder
 from .bifpn          import BiFPN, DepthwiseSeparableConv2d
+
+
+class SegLateralLayer(nn.Module):
+
+    def __init__(self, in_channels, out_channels, num_groups, num_layers, base_scale_factor = 2):
+        super().__init__()
+
+        self.enables_upsample = num_layers > 0
+
+        # Strange strategy, but...
+        num_layers = max(num_layers, 1)
+
+        # 3x3 convolution with pad 1, group norm and relu...
+        self.layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(in_channels  = (in_channels if idx == 0 else out_channels),
+                          out_channels = out_channels,
+                          kernel_size  = 3,
+                          padding      = 1,),
+                nn.GroupNorm(num_groups, out_channels),
+                nn.ReLU(),
+            )
+            for idx in range(num_layers)
+        ])
+
+        self.base_scale_factor = base_scale_factor
+
+
+    def forward(self, x):
+        for layer in self.layers:
+            # Conv3x3...
+            x = layer(x)
+
+            # Optional upsampling...
+            if self.enables_upsample:
+                x = F.interpolate(x,
+                                  scale_factor  = self.base_scale_factor,
+                                  mode          = 'bilinear',
+                                  align_corners = False)
+
+        return x
+
+
 
 
 class PeakNet(nn.Module):
@@ -32,11 +77,10 @@ class PeakNet(nn.Module):
                 16, # layer3
                 32, # layer4
             ]
-            CONFIG.SEG_HEAD.Q3_UP_SCALE_FACTOR = 4
-            CONFIG.SEG_HEAD.Q3_IN_CHANNELS     = 256
-            CONFIG.SEG_HEAD.FUSE_IN_CHANNELS   = 64 * 5
-            CONFIG.SEG_HEAD.OUT_CHANNELS       = 3
-            CONFIG.SEG_HEAD.USES_Q3            = True
+            CONFIG.SEG_HEAD.NUM_GROUPS         = 32
+            CONFIG.SEG_HEAD.OUT_CHANNELS       = 128
+            CONFIG.SEG_HEAD.NUM_CLASSES        = 3
+            CONFIG.SEG_HEAD.BASE_SCALE_FACTOR  = 2
 
         return CONFIG
 
@@ -67,18 +111,32 @@ class PeakNet(nn.Module):
         self.bifpn = BiFPN(config = self.config.BIFPN)
 
         # Create the prediction head...
-        in_channels  = self.config.SEG_HEAD.Q3_IN_CHANNELS if self.config.SEG_HEAD.USES_Q3 else \
-                       self.config.SEG_HEAD.FUSE_IN_CHANNELS
-        out_channels = self.config.SEG_HEAD.OUT_CHANNELS
-        self.head_segmask  = nn.Conv2d(in_channels  = in_channels,
-                                       out_channels = out_channels,
+        base_scale_factor         = self.config.SEG_HEAD.BASE_SCALE_FACTOR
+        max_scale_factor          = self.config.SEG_HEAD.UP_SCALE_FACTOR[0]
+        num_upscale_layer_list    = [ int(log(i/max_scale_factor)/log(2)) for i in self.config.SEG_HEAD.UP_SCALE_FACTOR ]
+        lateral_layer_in_channels = self.config.BIFPN.NUM_FEATURES
+        self.seg_lateral_layers = nn.ModuleList([
+            # Might need to reverse the order (pay attention to the order in the bifpn output)
+            SegLateralLayer(in_channels       = lateral_layer_in_channels,
+                            out_channels      = self.config.SEG_HEAD.OUT_CHANNELS,
+                            num_groups        = self.config.SEG_HEAD.NUM_GROUPS,
+                            num_layers        = num_upscale_layers,
+                            base_scale_factor = base_scale_factor)
+            for num_upscale_layers in num_upscale_layer_list
+        ])
+
+        num_classes = self.config.SEG_HEAD.NUM_CLASSES
+        self.head_segmask  = nn.Conv2d(in_channels  = self.config.SEG_HEAD.OUT_CHANNELS,
+                                       out_channels = num_classes,
                                        kernel_size  = 1,
                                        padding      = 0,)
+
+        self.max_scale_factor = max_scale_factor
 
         return None
 
 
-    def seg_from_fused(self, x):
+    def extract_features(self, x):
         # Calculate and save feature maps in multiple resolutions...
         fmap_in_encoder_layers = self.backbone(x)
 
@@ -91,52 +149,33 @@ class PeakNet(nn.Module):
         # Apply the BiFPN layer...
         bifpn_output_list = self.bifpn(bifpn_input_list)
 
-        # Upsample all bifpn output from high res to low res...
-        fmap_upscale_list = []
-        for idx, fmap in enumerate(bifpn_output_list):
-            scale_factor = self.config.SEG_HEAD.UP_SCALE_FACTOR[idx]
-            fmap_upscale = F.interpolate(fmap,
-                                         scale_factor  = scale_factor,
-                                         mode          = 'bilinear',
-                                         align_corners = False)
-            fmap_upscale_list.append(fmap_upscale)
-
-        # Concatenate all output...
-        fmap_upscale_final = torch.cat(fmap_upscale_list, dim = 1)    # B, C, H, W
-
-        # Predict segmentation in the head...
-        segmask = self.head_segmask(fmap_upscale_final)
-
-        return segmask
+        return bifpn_output_list
 
 
-    def seg_from_q3(self, x):
-        # Calculate and save feature maps in multiple resolutions...
-        fmap_in_encoder_layers = self.backbone(x)
+    def seg(self, x):
+        # Extract features from input...
+        bifpn_output_list = self.extract_features(x)
 
-        # Apply the BiFPN adapter...
-        bifpn_input_list = []
-        for idx, fmap in enumerate(fmap_in_encoder_layers):
-            bifpn_input = self.backbone_to_bifpn[idx](fmap)
-            bifpn_input_list.append(bifpn_input)
+        # Fuse feature maps at each resolution (from low res to high res)...
+        for idx, (lateral_layer, bifpn_output) in enumerate(zip(self.seg_lateral_layers[::-1], bifpn_output_list[::-1])):
+            fmap = lateral_layer(bifpn_output)
 
-        # Apply the BiFPN layer...
-        bifpn_output_list = self.bifpn(bifpn_input_list)
+            if idx == 0:
+                fmap_acc  = fmap
+            else:
+                fmap_acc += fmap
 
-        # Only upsample q3 output ...
-        q3_fmap = bifpn_output_list[0]
-        scale_factor = self.config.SEG_HEAD.Q3_UP_SCALE_FACTOR
-        fmap_upscale = F.interpolate(q3_fmap,
-                                     scale_factor  = scale_factor,
-                                     mode          = 'bilinear',
-                                     align_corners = False)
+        # Make prediction...
+        pred_map = self.head_segmask(fmap_acc)
 
-        # Predict segmentation in the head...
-        segmask = self.head_segmask(fmap_upscale)
+        # Upscale...
+        pred_map = F.interpolate(pred_map,
+                                 scale_factor  = self.max_scale_factor,
+                                 mode          = 'bilinear',
+                                 align_corners = False)
 
-        return segmask
+        return pred_map
 
 
     def forward(self, x):
-        return self.seg_from_q3   (x) if self.config.SEG_HEAD.USES_Q3 else \
-               self.seg_from_fused(x)
+        return self.seg(x)
