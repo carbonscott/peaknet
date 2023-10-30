@@ -86,8 +86,8 @@ class BiFPNBlock(nn.Module):
             CONFIG.UP_SCALE_FACTOR   = 2
             CONFIG.FUSION.EPS        = 1e-5
             CONFIG.NUM_BLOCKS        = 1
-            CONFIG.NUM_FEATURES      = 64
-            CONFIG.NUM_LEVELS        = 3
+            CONFIG.NUM_FEATURES      = 256
+            CONFIG.NUM_LEVELS        = 4
             CONFIG.BASE_LEVEL        = 2    # ...ResNet50 uses 2, EfficientNet uses 3
 
         return CONFIG
@@ -227,9 +227,9 @@ class BiFPN(nn.Module):
             CONFIG.UP_SCALE_FACTOR   = 2
             CONFIG.FUSION.EPS        = 1e-5
             CONFIG.NUM_BLOCKS        = 1
-            CONFIG.NUM_FEATURES      = 64
-            CONFIG.NUM_LEVELS        = 5
-            CONFIG.BASE_LEVEL        = 3
+            CONFIG.NUM_FEATURES      = 256
+            CONFIG.NUM_LEVELS        = 4
+            CONFIG.BASE_LEVEL        = 2
 
         return CONFIG
 
