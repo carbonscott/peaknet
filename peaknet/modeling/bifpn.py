@@ -66,11 +66,13 @@ class DepthwiseSeparableConv2d(nn.Module):
 
 class BiFPNBlock(nn.Module):
     """
-    One BiFPN block takes feature maps at five different scales:
-    (p3, p4, ..., pN).
+    One BiFPN block takes feature maps at L different scales(L>=3):
+    (p_i, p_(i+1), ..., p_(i+L-1))
 
-    Notice that the input to BiFPNBlock should have the same channel size, 
-    which can be achieved with a conv layer in the upstream.
+    where p_i = 2**(-i).
+
+    Notice that the input to BiFPNBlock should have the same channel size,
+    which can be achieved with a lateral conv layer in the upstream.
     """
 
     @staticmethod
@@ -83,24 +85,30 @@ class BiFPNBlock(nn.Module):
             CONFIG.DOWN_SCALE_FACTOR = 0.5
             CONFIG.UP_SCALE_FACTOR   = 2
             CONFIG.FUSION.EPS        = 1e-5
+            CONFIG.NUM_BLOCKS        = 1
+            CONFIG.NUM_FEATURES      = 64
+            CONFIG.NUM_LEVELS        = 3
+            CONFIG.BASE_LEVEL        = 2    # ...ResNet50 uses 2, EfficientNet uses 3
 
         return CONFIG
 
 
-    def __init__(self, num_features = 64, num_levels = 5, config = None):
+    def __init__(self, config = None):
         super().__init__()
 
         self.config = BiFPNBlock.get_default_config() if config is None else config
 
-        # Follow the paper's notation with base level starting from "3"...
-        BASE_LEVEL = 3
+        # Define shortcut variables that access the config values...
+        num_features = self.config.NUM_FEATURES
+        num_levels   = self.config.NUM_LEVELS
+        base_level   = self.config.BASE_LEVEL
 
         # Confusingly, there should be at least 3 levels in total...
         num_levels = max(num_levels, 3)
 
         # Decide the min max level...
-        min_level  = BASE_LEVEL
-        max_level  = BASE_LEVEL + (num_levels - 1)
+        min_level  = base_level
+        max_level  = base_level + (num_levels - 1)
 
         # Create conv2d layers for fusion stage M...
         # min_level, ..., max_level - 1
@@ -143,14 +151,12 @@ class BiFPNBlock(nn.Module):
         self.w_q = nn.Parameter(torch.randn(num_level_stage_q, 3))    # Three-component fusion at stage Q
 
         # Keep these numbers as attributes...
-        self.BASE_LEVEL = BASE_LEVEL
         self.min_level  = min_level
         self.max_level  = max_level
 
 
     def forward(self, x):
         # Keep these numbers as attributes...
-        BASE_LEVEL = self.BASE_LEVEL
         min_level  = self.min_level
         max_level  = self.max_level
         num_levels = max_level - min_level + 1
@@ -220,19 +226,22 @@ class BiFPN(nn.Module):
             CONFIG.DOWN_SCALE_FACTOR = 0.5
             CONFIG.UP_SCALE_FACTOR   = 2
             CONFIG.FUSION.EPS        = 1e-5
+            CONFIG.NUM_BLOCKS        = 1
+            CONFIG.NUM_FEATURES      = 64
+            CONFIG.NUM_LEVELS        = 5
+            CONFIG.BASE_LEVEL        = 3
 
         return CONFIG
 
 
-    def __init__(self, num_blocks = 1, num_features = 64, num_levels = 5, config = None):
+    def __init__(self, config = None):
         super().__init__()
 
         self.config = BiFPN.get_default_config() if config is None else config
 
+        num_blocks = self.config.NUM_BLOCKS
         self.blocks = nn.Sequential(*[
-            BiFPNBlock(num_features = num_features,
-                       num_levels   = num_levels,
-                       config       = self.config,)
+            BiFPNBlock(config = self.config)
             for block_idx in range(num_blocks)
         ])
 
