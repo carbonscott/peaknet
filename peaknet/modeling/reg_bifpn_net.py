@@ -77,10 +77,11 @@ class PeakNet(nn.Module):
                 16, # layer3
                 32, # layer4
             ]
-            CONFIG.SEG_HEAD.NUM_GROUPS         = 32
-            CONFIG.SEG_HEAD.OUT_CHANNELS       = 128
-            CONFIG.SEG_HEAD.NUM_CLASSES        = 3
-            CONFIG.SEG_HEAD.BASE_SCALE_FACTOR  = 2
+            CONFIG.SEG_HEAD.NUM_GROUPS            = 32
+            CONFIG.SEG_HEAD.OUT_CHANNELS          = 128
+            CONFIG.SEG_HEAD.NUM_CLASSES           = 3
+            CONFIG.SEG_HEAD.BASE_SCALE_FACTOR     = 2
+            CONFIG.SEG_HEAD.USES_LEARNED_UPSAMPLE = False
 
         return CONFIG
 
@@ -127,6 +128,13 @@ class PeakNet(nn.Module):
                                        kernel_size  = 1,
                                        padding      = 0,)
 
+        if self.config.SEG_HEAD.USES_LEARNED_UPSAMPLE:
+            self.head_upsample_layer = nn.ConvTranspose2d(in_channels  = self.config.SEG_HEAD.NUM_CLASSES,
+                                                          out_channels = self.config.SEG_HEAD.NUM_CLASSES,
+                                                          kernel_size  = 6,
+                                                          stride       = 4,
+                                                          padding      = 1,)
+
         self.max_scale_factor = max_scale_factor
 
         return None
@@ -168,7 +176,9 @@ class PeakNet(nn.Module):
         pred_map = F.interpolate(pred_map,
                                  scale_factor  = self.max_scale_factor,
                                  mode          = 'bilinear',
-                                 align_corners = False)
+                                 align_corners = False)                   \
+                   if not self.config.SEG_HEAD.USES_LEARNED_UPSAMPLE else \
+                   self.head_upsample_layer(pred_map)
 
         return pred_map
 
