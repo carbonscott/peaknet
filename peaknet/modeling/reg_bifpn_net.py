@@ -85,7 +85,7 @@ class PeakNet(nn.Module):
         return CONFIG
 
 
-    def __init__(self, num_blocks = 1, num_features = 256, num_levels = 4, base_level = 2, config = None):
+    def __init__(self, config = None):
         super().__init__()
 
         self.config = PeakNet.get_default_config() if config is None else config
@@ -94,9 +94,10 @@ class PeakNet(nn.Module):
         self.backbone = ImageEncoder(config = self.config.BACKBONE)
 
         # Create the adapter layer between encoder and bifpn...
+        num_bifpn_features = self.config.BIFPN.NUM_FEATURES
         self.backbone_to_bifpn = nn.ModuleList([
             nn.Conv2d(in_channels  = in_channels,
-                      out_channels = num_features,
+                      out_channels = num_bifpn_features,
                       kernel_size  = 1,
                       stride       = 1,
                       padding      = 0)
@@ -104,10 +105,6 @@ class PeakNet(nn.Module):
         ])
 
         # Create the fusion blocks...
-        self.config.BIFPN.NUM_BLOCKS   = num_blocks
-        self.config.BIFPN.NUM_FEATURES = num_features
-        self.config.BIFPN.NUM_LEVELS   = num_levels
-        self.config.BIFPN.BASE_LEVEL   = base_level
         self.bifpn = BiFPN(config = self.config.BIFPN)
 
         # Create the prediction head...
@@ -125,9 +122,8 @@ class PeakNet(nn.Module):
             for num_upscale_layers in num_upscale_layer_list
         ])
 
-        num_classes = self.config.SEG_HEAD.NUM_CLASSES
         self.head_segmask  = nn.Conv2d(in_channels  = self.config.SEG_HEAD.OUT_CHANNELS,
-                                       out_channels = num_classes,
+                                       out_channels = self.config.SEG_HEAD.NUM_CLASSES,
                                        kernel_size  = 1,
                                        padding      = 0,)
 
