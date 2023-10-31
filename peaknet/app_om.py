@@ -9,6 +9,8 @@ import cupy  as cp
 import torch
 import torch.nn.functional as F
 
+import yaml
+
 from math import isnan
 from cupyx.scipy import ndimage
 
@@ -23,9 +25,7 @@ class PeakFinder:
     def get_default_config():
         CONFIG = Configurator()
         with CONFIG.enable_auto_create():
-            CONFIG.MODEL.NUM_BLOCKS   = 3
-            CONFIG.MODEL.NUM_FEATURES = 64
-            CONFIG.MODEL.AUX_CONFIG   = PeakNet.get_default_config()
+            CONFIG.MODEL.CONFIG = PeakNet.get_default_config()
 
         return CONFIG
 
@@ -64,11 +64,26 @@ class PeakFinder:
 
 
 
-    def config_model(self, config = None):
+    def config_model(self, path_config = None):
+        with open(path_config, 'r') as fh:
+            config_dict = yaml.safe_load(fh)
+        CONFIG = Configurator.from_dict(config_dict)
+
+        # ...Model
+        bifpn_num_blocks    = CONFIG.MODEL.BIFPN.NUM_BLOCKS
+        bifpn_num_features  = CONFIG.MODEL.BIFPN.NUM_FEATURES
+        bifpn_num_levels    = CONFIG.MODEL.BIFPN.NUM_LEVELS
+        bifpn_base_level    = CONFIG.MODEL.BIFPN.NUM_LEVELS
+        seghead_num_classes = CONFIG.MODEL.SEG_HEAD.NUM_CLASSES
+
         # Cofnig the model architecture...
-        model = PeakNet( num_blocks   = config.NUM_BLOCKS,
-                         num_features = config.NUM_FEATURES,
-                         config       = config.AUX_CONFIG)
+        peaknet_config = PeakNet.get_default_config()
+        peaknet_config.BIFPN.NUM_BLOCKS     = bifpn_num_blocks
+        peaknet_config.BIFPN.NUM_FEATURES   = bifpn_num_features
+        peaknet_config.BIFPN.NUM_LEVELS     = bifpn_num_levels
+        peaknet_config.BIFPN.BASE_LEVEL     = bifpn_base_level
+        peaknet_config.SEG_HEAD.NUM_CLASSES = seghead_num_classes
+        model = PeakNet(config = peaknet_config)
 
         # Set device...
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
