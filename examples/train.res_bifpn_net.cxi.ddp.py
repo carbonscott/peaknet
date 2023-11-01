@@ -244,13 +244,6 @@ if freezes_backbone:
 
 model.float()
 
-if uses_ddp:
-    # Convert BatchNorm to SyncBatchNorm...
-    model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-
-    # Wrap it up using DDP...
-    model = DDP(model, device_ids = [ddp_local_rank], find_unused_parameters=True)
-
 
 # [[[ CRITERION ]]]
 criterion = CategoricalFocalLoss(alpha       = focal_alpha,
@@ -282,10 +275,22 @@ if path_chkpt_prev is not None:
     epoch_min, loss_min = load_checkpoint(model,
                                           optimizer,
                                           scheduler if uses_prev_scheduler else None,
-                                          path_chkpt_prev)
+                                          path_chkpt_prev,
+                                          device)
     ## epoch_min, loss_min = load_checkpoint(model, None, None, path_chkpt_prev)
     epoch_min += 1    # Next epoch
     logger.info(f"PREV - epoch_min = {epoch_min}, loss_min = {loss_min}")
+
+# Uses mixed precision???
+if uses_mixed_precision: scaler = torch.cuda.amp.GradScaler()
+
+# Wrapping the model in DDP...
+if uses_ddp:
+    # Convert BatchNorm to SyncBatchNorm...
+    model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+
+    # Wrap it up using DDP...
+    model = DDP(model, device_ids = [ddp_local_rank], find_unused_parameters=True)
 
 if ddp_rank == 0:
     print(f"Current timestamp: {timestamp}")
@@ -297,9 +302,6 @@ try:
         if uses_ddp:
             # Shuffle the training examples...
             sampler_train.set_epoch(epoch)
-
-        # Uses mixed precision???
-        if uses_mixed_precision: scaler = torch.cuda.amp.GradScaler()
 
         # ___/ TRAIN \___
         # Turn on training related components in the model...

@@ -364,8 +364,8 @@ def save_checkpoint(model, optimizer, scheduler, epoch, loss_min, path):
 
 
 
-def load_checkpoint(model, optimizer, scheduler, path):
-    checkpoint = torch.load(path)
+def load_checkpoint(model, optimizer, scheduler, path, device):
+    checkpoint = torch.load(path, map_location = device)
     if model     is not None: model.module.load_state_dict(checkpoint['model_state_dict']) \
                               if hasattr(model, 'module') else \
                               model.load_state_dict(checkpoint['model_state_dict'])
