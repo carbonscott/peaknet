@@ -38,7 +38,7 @@ class PeakFinder:
 
         # [[[ MODEL ]]]
         # Create model...
-        self.model, self.device = self.config_model(config = self.config.MODEL)
+        self.model, self.device = self.config_model(config = self.config.MODEL.CONFIG)
 
         # Load weights...
         if path_chkpt is not None:
