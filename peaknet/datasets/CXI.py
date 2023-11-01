@@ -13,7 +13,7 @@ from torch.utils.data import Dataset
 logger = logging.getLogger(__name__)
 
 
-class CXIDataset:
+class CXIManager:
     """
     Main tasks of this class:
     - Offers `get_img` function that returns a data point tensor with the shape
@@ -146,7 +146,7 @@ class CXIDataset:
 
         # Determine sample counts for each file...
         sample_weight_list = np.asarray(sample_weight_list)
-        sample_counts = CXIDataset.count_sample_by_category(num_samples, sample_weight_list)
+        sample_counts = CXIManager.count_sample_by_category(num_samples, sample_weight_list)
 
         # Sample with replacement from each file...
         key_data = self.CXI_KEY['data']
@@ -163,6 +163,10 @@ class CXIDataset:
             dataset.extend((path_cxi, sample_idx) for sample_idx in sample_idx_list)
 
         return dataset
+
+
+    def initialize_dataset(self, num_samples):
+        self.dataset = self.create_dataset(num_samples)
 
 
     def get_img(self, idx):
@@ -187,4 +191,55 @@ class CXIDataset:
 
 
     def __len__(self):
+        return len(self.dataset)
+
+
+
+
+class CXIDataset(Dataset):
+    """
+    SFX images are collected from multiple datasets specified in the input csv
+    file. All images are organized in a plain list.  
+
+    get_     method returns data by sequential index.
+    extract_ method returns object by files.
+    """
+
+    def __init__(self, cxi_manager, idx_list, trans_list = None, normalizes_img = True):
+        self.cxi_manager    = cxi_manager
+        self.idx_list       = idx_list
+        self.normalizes_img = normalizes_img
+        self.trans_list     = trans_list
+
+        return None
+
+
+    def __len__(self):
         return len(self.idx_list)
+
+
+    def __getitem__(self, idx):
+        cxi_idx = self.idx_list[idx]
+
+        img, label = self.cxi_manager[cxi_idx]
+
+        # Apply transformation to image and label at the same time...
+        if self.trans_list is not None:
+            data = np.concatenate([img, label], axis = 0)
+            for trans in self.trans_list:
+                data = trans(data)
+
+            img   = data[0:1]
+            label = data[1: ]
+
+        if self.normalizes_img:
+            # Normalize input image...
+            img_mean = np.nanmean(img)
+            img_std  = np.nanstd(img)
+            img      = img - img_mean
+
+            if img_std == 0:
+                img[:]   = 0
+                label[:] = 0
+
+        return img, label
