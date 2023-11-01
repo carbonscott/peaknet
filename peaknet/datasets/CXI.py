@@ -1,6 +1,7 @@
 import os
-import yaml
+import csv
 import h5py
+import random
 import numpy as np
 import logging
 
@@ -12,7 +13,7 @@ from torch.utils.data import Dataset
 logger = logging.getLogger(__name__)
 
 
-class CXIManager:
+class CXIDataset:
     """
     Main tasks of this class:
     - Offers `get_img` function that returns a data point tensor with the shape
@@ -28,54 +29,46 @@ class CXIManager:
       - EVENT 0
       - EVENT 1
     """
-
-    def __init__(self, path_yaml = None):
+    def __init__(self, path_csv = None):
         super().__init__()
 
         # Imported variables...
-        self.path_yaml = path_yaml
-
-        # Load the YAML file
-        with open(self.path_yaml, 'r') as fh:
-            config = yaml.safe_load(fh)
-        path_cxi_list = config['cxi']
+        self.path_csv    = path_csv
 
         # Define the keys used below...
         CXI_KEY = {
-            "num_peaks" : "/entry_1/result_1/nPeaks",
-            "peak_y"    : "/entry_1/result_1/peakYPosRaw",
-            "peak_x"    : "/entry_1/result_1/peakXPosRaw",
             "data"      : "/entry_1/data_1/data",
-            "mask"      : "/entry_1/data_1/mask",
             "segmask"   : "/entry_1/data_1/segmask",
         }
 
-        # Open all cxi files and track their status...
+        # Importing data from csv...
         cxi_dict = {}
-        for path_cxi in path_cxi_list:
-            # Open a new file???
-            if path_cxi not in cxi_dict:
-                print(f"Opening {path_cxi}...")
-                cxi_dict[path_cxi] = {
-                    "file_handle" : h5py.File(path_cxi, 'r'),
-                    "is_open"     : True,
-                }
+        with open(path_csv, 'r') as fh:
+            lines = csv.reader(fh)
 
-        # Build an entire idx list...
-        idx_list = []
-        for path_cxi, cxi in cxi_dict.items():
-            fh = cxi["file_handle"]
-            k  = CXI_KEY["num_peaks"]
-            num_event = fh.get(k)[()]
-            for event_idx in range(len(num_event)):
-                idx_list.append((path_cxi, event_idx, fh))
+            # Skip the header
+            next(lines)
 
+            # Open all cxi files and track their status...
+            for line in lines:
+                # Fetch metadata of a dataset
+                path_cxi, sample_weight = line
+
+                # Open a new file???
+                if path_cxi not in cxi_dict:
+                    print(f"Opening {path_cxi}...")
+                    cxi_dict[path_cxi] = {
+                        "file_handle"   : h5py.File(path_cxi, 'r'),
+                        "is_open"       : True,
+                        "sample_weight" : float(sample_weight),
+                    }
 
         # Internal variables...
         self.cxi_dict      = cxi_dict
         self.CXI_KEY       = CXI_KEY
-        self.path_cxi_list = path_cxi_list
-        self.idx_list      = idx_list
+
+        # Init dataset...
+        self.dataset = []
 
         return None
 
@@ -97,24 +90,94 @@ class CXIManager:
                 print(f"{path_cxi} is closed.")
 
 
+    @staticmethod
+    def count_sample_by_category(num_samples, weights):
+        """
+        Provide a list detailing the count of samples from each category.
+
+        Arguments:
+
+            num_samples : Int
+                Total number of samples across all categories.
+
+            weights : List
+                Weight for each category.
+
+        Returns:
+
+            sample_counts_int : List
+                A list of sample counts for each category.
+
+        """
+        # Normalizing weights...
+        normalized_weights = weights / weights.sum()
+
+        # Allocate samples by weights...
+        sample_counts = num_samples * normalized_weights
+
+        # Split into integer and fractional parts...
+        sample_counts_int  = np.floor(sample_counts).astype(int)
+        sample_counts_frac = sample_counts - sample_counts_int
+
+        # Determine number of left over samples...
+        num_remaining_samples = num_samples - sample_counts_int.sum()
+        num_remaining_samples = int(num_remaining_samples)
+
+        # Find the indices of the largest fractional parts...
+        indices_sorted_by_remainder = np.argsort(sample_counts_frac)[::-1]    # ...Descending order
+        indices_to_accept_remanider = indices_sorted_by_remainder[:num_remaining_samples]
+
+        # Assign a singular remaining sample to these indices...
+        sample_counts_int[indices_to_accept_remanider] += 1
+
+        return sample_counts_int
+
+
+    def create_dataset(self, num_samples):
+        cxi_dict = self.cxi_dict
+
+        # Get the sample weights...
+        cxi_list           = []
+        sample_weight_list = []
+        for path_cxi, metadata in cxi_dict.items():
+            sample_weight = metadata['sample_weight']
+            sample_weight_list.append(sample_weight)
+            cxi_list.append(path_cxi)
+
+        # Determine sample counts for each file...
+        sample_weight_list = np.asarray(sample_weight_list)
+        sample_counts = CXIDataset.count_sample_by_category(num_samples, sample_weight_list)
+
+        # Sample with replacement from each file...
+        key_data = self.CXI_KEY['data']
+        dataset  = []
+        for path_cxi, sample_count in zip(cxi_list, sample_counts):
+            # Fetch the total number of samples in the category...
+            cxi_metadata = cxi_dict[path_cxi]
+            fh = cxi_metadata['file_handle']
+            num_data = fh.get(key_data).shape[0]
+
+            # Choose...
+            sample_idx_list = random.choices(range(num_data), k = sample_count)
+
+            dataset.extend((path_cxi, sample_idx) for sample_idx in sample_idx_list)
+
+        return dataset
+
+
     def get_img(self, idx):
-        path_cxi, event_idx, fh = self.idx_list[idx]
+        path_cxi, idx_in_cxi = self.dataset[idx]
+
+        # Obtain the file handle...
+        fh = self.cxi_dict[path_cxi]['file_handle']
 
         # Obtain the image...
         k   = self.CXI_KEY["data"]
-        img = fh.get(k)[event_idx]
-
-        # Obtain the bad pixel mask...
-        k    = self.CXI_KEY['mask']
-        mask = fh.get(k)
-        mask = mask[event_idx] if mask.ndim == 3 else mask[()]
-
-        # Apply mask...
-        img = apply_mask(img, 1 - mask, mask_value = 0)
+        img = fh.get(k)[idx_in_cxi]
 
         # Obtain the segmask...
         k       = self.CXI_KEY["segmask"]
-        segmask = fh.get(k)[event_idx]
+        segmask = fh.get(k)[idx_in_cxi]
 
         return img[None,], segmask[None,]
 
@@ -125,60 +188,3 @@ class CXIManager:
 
     def __len__(self):
         return len(self.idx_list)
-
-
-
-
-class CXIDataset(Dataset):
-    """
-    SFX images are collected from multiple datasets specified in the input csv
-    file. All images are organized in a plain list.  
-
-    get_     method returns data by sequential index.
-    extract_ method returns object by files.
-    """
-
-    def __init__(self, cxi_manager, idx_list, trans_list      = None,
-                                              normalizes_data = False,
-                                              reverses_bg     = False,):
-        self.cxi_manager     = cxi_manager
-        self.idx_list        = idx_list
-        self.trans_list      = trans_list
-        self.normalizes_data = normalizes_data
-        self.reverses_bg     = reverses_bg
-
-        return None
-
-
-    def __len__(self):
-        return len(self.idx_list)
-
-
-    def __getitem__(self, idx):
-        sample_idx   = self.idx_list[idx]
-        img, segmask = self.cxi_manager[sample_idx]    # ...Each has shape (1, H, W)
-
-        batch_data = np.concatenate([img, segmask], axis = 0)
-        if self.trans_list is not None:
-            for trans in self.trans_list:
-                batch_data = trans(batch_data)
-
-        data  = batch_data[0:1]
-        label = batch_data[1: ]
-
-        if self.reverses_bg:
-            label[-1] = 1 - label[-1]
-
-        if self.normalizes_data:
-            # Normalize input image...
-            data_mean = np.nanmean(data)
-            data_std  = np.nanstd(data)
-            data      = data - data_mean
-
-            if data_std == 0:
-                data_std = 1.0
-                label[:] = 0
-
-            data /= data_std
-
-        return data, label
