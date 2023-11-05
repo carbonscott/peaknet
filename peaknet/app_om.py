@@ -21,24 +21,13 @@ from .configurator import Configurator
 
 class PeakFinder:
 
-    @staticmethod
-    def get_default_config():
-        CONFIG = Configurator()
-        with CONFIG.enable_auto_create():
-            CONFIG.MODEL.CONFIG = PeakNet.get_default_config()
-
-        return CONFIG
-
-
     def __init__(self, path_chkpt = None, path_cheetah_geom = None, config = None):
-        self.config = PeakFinder.get_default_config() if config is None else config
-
         # Set up default path to load default files...
         default_path = os.path.dirname(__file__)
 
         # [[[ MODEL ]]]
         # Create model...
-        self.model, self.device = self.config_model(config = self.config.MODEL.CONFIG)
+        self.model, self.device = self.config_model(path_config = config)
 
         # Load weights...
         if path_chkpt is not None:
@@ -61,7 +50,6 @@ class PeakFinder:
                                    [1,1,1]])
 
         self.model.eval()
-
 
 
     def config_model(self, path_config = None):
@@ -113,7 +101,7 @@ class PeakFinder:
             center_of_mass = ndimage.center_of_mass(img, label, cp.asarray(range(1, num_feature+1)))
             batch_center_of_mass[i] = center_of_mass
 
-        batch_center_of_mass = [ (i, y.get(), x.get()) for i, center_of_mass in enumerate(batch_center_of_mass) for y, x in center_of_mass ]
+        batch_center_of_mass = [ (i, y.tolist(), x.tolist()) for i, center_of_mass in enumerate(batch_center_of_mass) for y, x in center_of_mass ]
 
         return batch_center_of_mass
 
@@ -180,6 +168,55 @@ class PeakFinder:
         mask_stack_predicted = mask_stack_predicted.argmax(dim = 1, keepdims = True)
         mask_stack_predicted = F.one_hot(mask_stack_predicted.reshape(B, -1), num_classes = C).permute(0, 2, 1).reshape(B, -1, H, W)
         label_predicted = mask_stack_predicted[:, 1]
+        label_predicted = label_predicted.to(torch.int)
+
+        # Find center of mass for each image in the stack...
+        num_stack, size_y, size_x = label_predicted.shape
+        batch_peak_in_panels = self.calc_batch_center_of_mass(img_stack, label_predicted.view(num_stack, size_y, size_x))
+
+        # A workaround to avoid copying gpu memory to cpu when num of peaks is small...
+        if len(batch_peak_in_panels) >= min_num_peaks:
+            # Convert to cheetah coordinates...
+            for peak_pos in batch_peak_in_panels:
+                idx_panel, y, x = peak_pos
+                idx_panel = int(idx_panel)
+
+                if uses_geom:
+                    x_min, y_min, x_max, y_max = self.cheetah_geom_list[idx_panel]
+
+                    x += x_min
+                    y += y_min
+
+                peak_list.append((idx_panel, y, x))
+
+        ret = peak_list, None
+        if returns_prediction_map: ret = peak_list, mask_stack_predicted.cpu().numpy()
+
+        return ret
+
+
+    def find_peak_w_threshold(self, img_stack, min_num_peaks = 0, threshold = 0.25, uses_geom = True, returns_prediction_map = False, uses_mixed_precision = True):
+        peak_list = []
+
+        # Normalize the image stack...
+        img_stack = (img_stack - img_stack.mean(axis = (-1, -2), keepdim = True)) / img_stack.std(axis = (-1, -2), keepdim = True)
+
+        # Get activation feature map given the image stack...
+        ## self.model.eval()
+        with torch.no_grad():
+            if uses_mixed_precision:
+                with torch.cuda.amp.autocast(dtype = torch.float16):
+                    fmap_stack = self.model.forward(img_stack)
+            else:
+                fmap_stack = self.model.forward(img_stack)
+
+        # Convert to probability with the softmax function...
+        mask_stack_predicted = fmap_stack.softmax(dim = 1)
+
+        B, C, H, W = mask_stack_predicted.shape
+        label_predicted = mask_stack_predicted[:, 1][:]
+        label_predicted[label_predicted  < threshold] = 0.
+        label_predicted[label_predicted >= threshold] = 1.
         label_predicted = label_predicted.to(torch.int)
 
         # Find center of mass for each image in the stack...
