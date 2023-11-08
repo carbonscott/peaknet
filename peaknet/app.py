@@ -27,7 +27,7 @@ class PeakFinder:
 
         # [[[ MODEL ]]]
         # Create model...
-        self.model, self.device, self.peaknet_config = self.config_model(path_yaml = path_yaml_config)
+        self.model, self.device, self.config = self.config_model(path_yaml = path_yaml_config)
 
         # Load weights...
         if path_chkpt is not None:
@@ -77,7 +77,7 @@ class PeakFinder:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         model.to(device)
 
-        return model, device, peaknet_config
+        return model, device, CONFIG
 
 
     def calc_batch_center_of_mass(self, img_stack, batch_mask):
