@@ -31,7 +31,7 @@ class PeakFinder:
 
         # Load weights...
         if path_chkpt is not None:
-            chkpt = torch.load(path_chkpt)
+            chkpt = torch.load(path_chkpt, map_location = self.device)
             self.model.module.load_state_dict(chkpt['model_state_dict']) if hasattr(self.model, 'module') else \
                    self.model.load_state_dict(chkpt['model_state_dict'])
 
