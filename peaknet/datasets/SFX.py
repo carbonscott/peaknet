@@ -124,13 +124,14 @@ class SFXMulticlassDataset(Dataset):
         idx_sample = self.idx_sample_list[idx]
 
         batch_data = self.data_list[idx_sample]    # (2, 1, 256, 256)
+        batch_data = batch_data[:, 0]    # (2, 256, 256)
         ## batch_data = np.concatenate(data, axis = 0)
 
         if trans_list is not None:
             for trans in trans_list:
                 batch_data = trans(batch_data)
 
-        img   = batch_data[0:1]    # (1, 1, 256, 256)
+        img   = batch_data[0:1]    # (1, 256, 256)
         label = batch_data[1: ]
 
         if self.reverse_bg:

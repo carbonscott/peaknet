@@ -248,8 +248,8 @@ class CXIDataset(Dataset):
             for trans in self.trans_list:
                 data = trans(data)
 
-            img   = data[0:1][None,]    # (1, 1, 256, 256)
-            label = data[1: ][None,]    # (1, 1, 256, 256)
+            img   = data[0:1]    # (1, 256, 256)
+            label = data[1: ]    # (1, 256, 256)
 
         if self.normalizes_img:
             # Normalize input image...
