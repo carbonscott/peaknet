@@ -58,8 +58,8 @@ class CXIManager:
                 if path_cxi not in cxi_dict:
                     print(f"Opening {path_cxi}...")
                     cxi_dict[path_cxi] = {
-                        "file_handle"   : h5py.File(path_cxi, 'r'),
-                        "is_open"       : True,
+                        ## "file_handle"   : h5py.File(path_cxi, 'r'),
+                        ## "is_open"       : True,
                         "sample_weight" : float(sample_weight),
                     }
 
@@ -154,8 +154,9 @@ class CXIManager:
         for path_cxi, sample_count in zip(cxi_list, sample_counts):
             # Fetch the total number of samples in the category...
             cxi_metadata = cxi_dict[path_cxi]
-            fh = cxi_metadata['file_handle']
-            num_data = fh.get(key_data).shape[0]
+            with h5py.File(path_cxi, 'r') as fh:
+                ## fh = cxi_metadata['file_handle']
+                num_data = fh.get(key_data).shape[0]
 
             # Choose...
             sample_idx_list = random.choices(range(num_data), k = sample_count)
@@ -168,20 +169,23 @@ class CXIManager:
     def initialize_dataset(self, num_samples):
         self.dataset = self.create_dataset(num_samples)
 
+        return self.dataset
+
 
     def get_img(self, idx):
         path_cxi, idx_in_cxi = self.dataset[idx]
 
-        # Obtain the file handle...
-        fh = self.cxi_dict[path_cxi]['file_handle']
+        with h5py.File(path_cxi, 'r') as fh:
+            ## # Obtain the file handle...
+            ## fh = self.cxi_dict[path_cxi]['file_handle']
 
-        # Obtain the image...
-        k   = self.CXI_KEY["data"]
-        img = fh.get(k)[idx_in_cxi]
+            # Obtain the image...
+            k   = self.CXI_KEY["data"]
+            img = fh.get(k)[idx_in_cxi, :, :]
 
-        # Obtain the segmask...
-        k       = self.CXI_KEY["segmask"]
-        segmask = fh.get(k)[idx_in_cxi]
+            # Obtain the segmask...
+            k       = self.CXI_KEY["segmask"]
+            segmask = fh.get(k)[idx_in_cxi, :, :]
 
         return img[None,], segmask[None,]
 
@@ -205,11 +209,16 @@ class CXIDataset(Dataset):
     extract_ method returns object by files.
     """
 
-    def __init__(self, cxi_manager, idx_list, trans_list = None, normalizes_img = True):
-        self.cxi_manager    = cxi_manager
+    def __init__(self, idx_list, trans_list = None, normalizes_img = True):
         self.idx_list       = idx_list
         self.normalizes_img = normalizes_img
         self.trans_list     = trans_list
+
+        # Define the keys used below...
+        self.CXI_KEY = {
+            "data"      : "/entry_1/data_1/data",
+            "segmask"   : "/entry_1/data_1/segmask",
+        }
 
         return None
 
@@ -219,18 +228,28 @@ class CXIDataset(Dataset):
 
 
     def __getitem__(self, idx):
-        cxi_idx = self.idx_list[idx]
+        path_cxi, idx_in_cxi = self.idx_list[idx]
 
-        img, label = self.cxi_manager[cxi_idx]
+        with h5py.File(path_cxi, 'r') as fh:
+            ## # Obtain the file handle...
+            ## fh = self.cxi_dict[path_cxi]['file_handle']
+
+            # Obtain the image...
+            k   = self.CXI_KEY["data"]
+            img = fh.get(k)[idx_in_cxi, :, :][None,]    # (1, 256, 256)
+
+            # Obtain the segmask...
+            k       = self.CXI_KEY["segmask"]
+            label = fh.get(k)[idx_in_cxi, :, :][None,]    # (1, 256, 256)
 
         # Apply transformation to image and label at the same time...
         if self.trans_list is not None:
-            data = np.concatenate([img, label], axis = 0)
+            data = np.concatenate([img, label], axis = 0)    # (2, 256, 256)
             for trans in self.trans_list:
                 data = trans(data)
 
-            img   = data[0:1]
-            label = data[1: ]
+            img   = data[0:1][None,]    # (1, 1, 256, 256)
+            label = data[1: ][None,]    # (1, 1, 256, 256)
 
         if self.normalizes_img:
             # Normalize input image...
@@ -239,7 +258,9 @@ class CXIDataset(Dataset):
             img      = img - img_mean
 
             if img_std == 0:
-                img[:]   = 0
+                img_std  = 1.0
                 label[:] = 0
+
+            img /= img_std
 
         return img, label
