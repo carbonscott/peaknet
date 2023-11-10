@@ -30,10 +30,12 @@ num_gpus            = args.num_gpus
 num_workers         = args.num_workers
 trainer             = args.trainer
 
+cpu_per_task = (num_workers * num_gpus) + 2
+
 # Set up the environment and the loader
 env = Environment(loader=FileSystemLoader('.'))
 drc_template = 'template'
-bash_template = env.get_template(os.path.join(drc_template, 'slurm.sh'))
+bash_template = env.get_template(os.path.join(drc_template, 'slurm.multi_node.sh' if num_nodes > 1 else 'slurm.single_node.sh'))
 yaml_template = env.get_template(os.path.join(drc_template, 'config.yaml'))
 
 # Render the yaml script
@@ -63,14 +65,8 @@ drc_yaml = os.path.join(drc_base, 'yaml')
 os.makedirs(drc_yaml, exist_ok = True)
 
 # ...Slurm
-drc_slurm = os.path.join(drc_base, 'slurm')
+drc_slurm = os.path.join(drc_base, 'sbatch')
 os.makedirs(drc_slurm, exist_ok = True)
-
-# Specify if unique world seed should be used...
-CONFIG.DDP.USES_UNIQUE_WORLD_SEED = True
-
-# Specify learning rate...
-CONFIG.OPTIM.LR = 3e-4    # See notes in experiments/notes/scan_lr.md
 
 # Specify the configuration to scan and the range...
 scan_range = [0, ]
@@ -109,6 +105,7 @@ for enum_idx, num_bifpn_block in enumerate(scan_range):
                                                 num_gpus          = num_gpus,
                                                 cwd               = cwd,
                                                 trainer           = trainer,
+                                                cpu_per_task      = cpu_per_task,
                                                 path_output_slurm = path_output_slurm,
                                                 path_output_yaml  = path_output_yaml)
     with open(path_output_slurm, 'w') as fh:
