@@ -38,12 +38,12 @@ class SFXInferenceDataset(Dataset):
         data = self.psana_img.get(event, None, self.img_mode)    # (B, H, W) or (H, W)
 
         # Mask out bad pixels...
-        data = apply_mask(data, self.mask_bad_pixel, mask_value = 0)
+        data = apply_mask(data, self.bad_pixel_mask, mask_value = 0)
 
         # Unify the data dimension...
         if data.ndim == 2: data = data[None,]    # (H, W) -> (1, H, W)
 
         # Build metadata...
-        metadata = [ (event, idx) for idx, _ in enumerate(data) ]
+        metadata = np.array([ (event, idx) for idx, _ in enumerate(data) ], dtype = int)
 
         return data, metadata
