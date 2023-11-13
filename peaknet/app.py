@@ -78,8 +78,8 @@ class PeakFinder:
         model.to(device)
 
         if CONFIG.MODEL.COMPILES:
-            print("Compiling the model...")
             if hasattr(torch, 'compile'):
+                print("Compiling the model...")
                 model = torch.compile(model) # requires PyTorch 2.0
 
         return model, device, CONFIG
