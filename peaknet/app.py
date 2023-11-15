@@ -144,9 +144,9 @@ class PeakFinder:
         with torch.no_grad():
             if uses_mixed_precision:
                 with torch.cuda.amp.autocast(dtype = torch.float16):
-                    fmap_stack = self.model.forward(img_stack)
+                    fmap_stack = self.model(img_stack)
             else:
-                fmap_stack = self.model.forward(img_stack)
+                fmap_stack = self.model(img_stack)
 
         return fmap_stack
 
@@ -162,9 +162,9 @@ class PeakFinder:
         with torch.no_grad():
             if uses_mixed_precision:
                 with torch.cuda.amp.autocast(dtype = torch.float16):
-                    fmap_stack = self.model.forward(img_stack)
+                    fmap_stack = self.model(img_stack)
             else:
-                fmap_stack = self.model.forward(img_stack)
+                fmap_stack = self.model(img_stack)
 
         # Convert to probability with the softmax function...
         mask_stack_predicted = fmap_stack.softmax(dim = 1)
@@ -210,9 +210,9 @@ class PeakFinder:
         with torch.no_grad():
             if uses_mixed_precision:
                 with torch.cuda.amp.autocast(dtype = torch.float16):
-                    fmap_stack = self.model.forward(img_stack)
+                    fmap_stack = self.model(img_stack)
             else:
-                fmap_stack = self.model.forward(img_stack)
+                fmap_stack = self.model(img_stack)
 
         # Convert to probability with the softmax function...
         mask_stack_predicted = fmap_stack.softmax(dim = 1)
