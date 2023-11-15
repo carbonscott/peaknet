@@ -180,19 +180,18 @@ class PeakFinder:
         batch_peak_in_panels = self.calc_batch_center_of_mass(img_stack, label_predicted.view(num_stack, size_y, size_x))
 
         # A workaround to avoid copying gpu memory to cpu when num of peaks is small...
-        if len(batch_peak_in_panels) >= min_num_peaks:
-            # Convert to cheetah coordinates...
-            for peak_pos in batch_peak_in_panels:
-                idx_panel, y, x = peak_pos
-                idx_panel = int(idx_panel)
+        # Convert to cheetah coordinates...
+        for peak_pos in batch_peak_in_panels:
+            idx_panel, y, x = peak_pos
+            idx_panel = int(idx_panel)
 
-                if uses_geom:
-                    x_min, y_min, x_max, y_max = self.cheetah_geom_list[idx_panel]
+            if uses_geom:
+                x_min, y_min, x_max, y_max = self.cheetah_geom_list[idx_panel]
 
-                    x += x_min
-                    y += y_min
+                x += x_min
+                y += y_min
 
-                peak_list.append((idx_panel, y, x))
+            peak_list.append((idx_panel, y, x))
 
         ret = peak_list, None
         if returns_prediction_map: ret = peak_list, mask_stack_predicted.cpu().numpy()
