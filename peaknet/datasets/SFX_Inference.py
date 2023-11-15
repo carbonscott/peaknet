@@ -15,7 +15,7 @@ class SFXInferenceDataset(Dataset):
     This class provides batched images for high through model inference.
     """
 
-    def __init__(self, exp, run, mode, detector_name, img_mode):
+    def __init__(self, exp, run, mode, detector_name, img_mode, event_list = None):
         super().__init__()
 
         self.exp           = exp
@@ -23,6 +23,7 @@ class SFXInferenceDataset(Dataset):
         self.mode          = mode
         self.detector_name = detector_name
         self.img_mode      = img_mode
+        self.event_list    = event_list
 
         # Define the Psana image handle...
         self.psana_img = PsanaImg(exp, run, mode, detector_name)
@@ -30,10 +31,13 @@ class SFXInferenceDataset(Dataset):
 
 
     def __len__(self):
-        return len(self.psana_img)
+        return len(self.psana_img) if self.event_list is None else len(self.event_list)
 
 
-    def __getitem__(self, event):
+    def __getitem__(self, idx):
+        # Fetch the event based on idx...
+        event = idx if self.event_list is None else self.event_list[idx]
+
         # Fetch pixel data using psana...
         data = self.psana_img.get(event, None, self.img_mode)    # (B, H, W) or (H, W)
 
@@ -47,6 +51,6 @@ class SFXInferenceDataset(Dataset):
         if data.ndim == 2: data = data[None,]    # (H, W) -> (1, H, W)
 
         # Build metadata...
-        metadata = np.array([ (event, idx) for idx, _ in enumerate(data) ], dtype = int)
+        metadata = np.array([ (idx, event, panel_idx_in_batch) for panel_idx_in_batch, _ in enumerate(data) ], dtype = np.int32)
 
         return data, metadata
