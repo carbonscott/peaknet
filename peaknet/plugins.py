@@ -4,6 +4,7 @@
 import pickle
 import numpy as np
 import cupy  as cp
+import regex
 
 import torch
 import torch.nn.functional as F
@@ -684,6 +685,71 @@ class PsanaImg:
                                                    unbondnbrs  = True,
                                                    unbondnbrs8 = False).astype(np.uint16)
 
+
+
+
+class Psana2Cheetah:
+
+    def __init__(self, path_cheetah_geom):
+        self.path_cheetah_geom = path_cheetah_geom
+
+        with open(self.path_cheetah_geom, 'rb') as handle:
+            cheetah_geom_dict = pickle.load(handle)
+
+        cheetah_geom_regex = regex.compile(r"""
+            (?x)
+            [a-z](?<PANEL>[0-9]+)[a-z](?<ASIC>[0-9]+)
+        """)
+        cheetah2psana_geom_dict = {}
+        for panel_str, (x_min, y_min, x_max, y_max) in cheetah_geom_dict.items():
+            capture_dict = cheetah_geom_regex.match(panel_str).capturesdict()
+            panel_id = capture_dict['PANEL'][0]
+            asic_id  = capture_dict['ASIC'][0]
+
+            x_max += 1
+            y_max += 1
+
+            panel_id = int(panel_id)
+            if panel_id not in cheetah2psana_geom_dict: cheetah2psana_geom_dict[panel_id] = [x_min, y_min, x_max, y_max]
+            panel_x_min, panel_y_min, panel_x_max, panel_y_max = cheetah2psana_geom_dict[panel_id]
+            panel_x_min = min(panel_x_min, x_min)
+            panel_y_min = min(panel_y_min, y_min)
+            panel_x_max = max(panel_x_max, x_max)
+            panel_y_max = max(panel_y_max, y_max)
+            cheetah2psana_geom_dict[panel_id] = panel_x_min, panel_y_min, panel_x_max, panel_y_max
+
+        self.cheetah_geom_dict       = cheetah_geom_dict
+        self.cheetah2psana_geom_dict = cheetah2psana_geom_dict
+
+
+    def convert_to_cheetah_img(self, img):
+        W_cheetah, H_cheetah = list(self.cheetah2psana_geom_dict.values())[-1][-2:]
+        cheetah_img = np.zeros((H_cheetah, W_cheetah))
+
+        for panel_id, (x_min, y_min, x_max, y_max) in self.cheetah2psana_geom_dict.items():
+            H = y_max - y_min
+            W = x_max - x_min
+            cheetah_img[y_min:y_max, x_min:x_max] = img[panel_id, 0:H, 0:W]
+
+        return cheetah_img
+
+
+    def convert_to_cheetah_coords(self, peaks_psana_list):
+        peaks_cheetah_list = [
+            self.convert_to_cheetah_coord(idx_panel, y, x)
+            for idx_panel, y, x in peaks_psana_list
+        ]
+
+        return peaks_cheetah_list
+
+
+    def convert_to_cheetah_coord(self, idx_panel, y, x):
+        x_min, y_min, x_max, y_max = self.cheetah2psana_geom_dict[idx_panel]
+
+        x += x_min
+        y += y_min
+
+        return idx_panel, y, x
 
 
 
