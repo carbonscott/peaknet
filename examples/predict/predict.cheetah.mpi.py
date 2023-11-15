@@ -452,11 +452,12 @@ if mpi_rank == 0:
             f.create_dataset('/LCLS/photon_energy_eV'       , (1, ), dtype = 'float32', )
 
             for event_enum_idx, (event, peaks_per_event, _) in enumerate(event_filtered_list):
-                f['/entry_1/result_1/nPeaksAll'][event_enum_idx] = len(peaks_per_event)
+                num_peaks_per_event = len(peaks_per_event)
+                if not (num_peaks_per_event < max_num_peak): continue
+
+                f['/entry_1/result_1/nPeaksAll'][event_enum_idx] = num_peaks_per_event
 
                 for peak_enum_idx, peak in enumerate(peaks_per_event):
-                    if not (i < max_num_peak): break
-
                     seg, cheetahRow, cheetahCol = peak
                     f['/entry_1/result_1/peakXPosRawAll'][event, peak_enum_idx] = cheetahCol
                     f['/entry_1/result_1/peakYPosRawAll'][event, peak_enum_idx] = cheetahRow
