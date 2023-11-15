@@ -1,0 +1,40 @@
+# ___/ PeakNet model \___
+path_chkpt : "experiments/chkpts/opt_cxi.00.2023_1108_2307_12.epoch_96.chkpt"
+path_yaml  : "experiments/yaml/opt_cxi.00.yaml"
+
+# ___/ Experimental data \___
+# Psana...
+exp           : "mfxx49820"
+run           : 107
+img_load_mode : "calib"
+access_mode   : "idx"
+detector_name : "epix10k2M"
+photon_energy : 9.28e3
+encoder_value : 0
+
+# Data range...
+event_min : 0
+event_max : null
+
+# ___/ Peak finding \___
+uses_int_coords        : True
+mask_custom_npy        : null
+max_num_peak           : 2048
+min_num_peak           : 10
+num_model_on_gpu       : 1
+dataloader_batch_size  : 5
+returns_prediction_map : false
+
+# ___/ Index \___
+path_cell : null
+path_geom : null
+
+# ___/ Output \___
+dir_results    : "inference_results"
+pf_tag         : ''
+index_tag      : null
+mpi_batch_size : 1
+
+# ___/ Misc \___
+path_cheetah_geom : 'cheetah_geom.epix10k2M.pickle'
+num_cpu : 10
