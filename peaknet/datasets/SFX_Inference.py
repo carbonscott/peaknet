@@ -42,7 +42,7 @@ class SFXInferenceDataset(Dataset):
         data = self.psana_img.get(event, None, self.img_mode)    # (B, H, W) or (H, W)
 
         if data is None:
-            data = np.zeros_like(self.bad_pixel_mask)
+            data = np.zeros_like(self.bad_pixel_mask, dtype = np.float32)
 
         # Mask out bad pixels...
         data = apply_mask(data, self.bad_pixel_mask, mask_value = 0)
