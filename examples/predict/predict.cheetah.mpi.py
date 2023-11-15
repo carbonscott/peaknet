@@ -458,8 +458,8 @@ if mpi_rank == 0:
                     if not (i < max_num_peak): break
 
                     seg, cheetahRow, cheetahCol = peak
-                    f['/entry_1/result_1/peakXPosRawAll'][event_enum_idx, peak_enum_idx] = cheetahCol
-                    f['/entry_1/result_1/peakYPosRawAll'][event_enum_idx, peak_enum_idx] = cheetahRow
+                    f['/entry_1/result_1/peakXPosRawAll'][event, peak_enum_idx] = cheetahCol
+                    f['/entry_1/result_1/peakYPosRawAll'][event, peak_enum_idx] = cheetahRow
 
             f['/LCLS/detector_1/EncoderValue'       ][0] = encoder_value
             f['/LCLS/photon_energy_eV'              ][0] = photon_energy
