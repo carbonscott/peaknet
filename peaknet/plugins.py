@@ -688,7 +688,7 @@ class PsanaImg:
 
 
 
-class Psana2Cheetah:
+class CheetahConverter:
 
     def __init__(self, path_cheetah_geom):
         self.path_cheetah_geom = path_cheetah_geom
@@ -704,7 +704,7 @@ class Psana2Cheetah:
         for panel_str, (x_min, y_min, x_max, y_max) in cheetah_geom_dict.items():
             capture_dict = cheetah_geom_regex.match(panel_str).capturesdict()
             panel_id = capture_dict['PANEL'][0]
-            asic_id  = capture_dict['ASIC'][0]
+            asic_id  = capture_dict['ASIC' ][0]
 
             x_max += 1
             y_max += 1
@@ -724,7 +724,7 @@ class Psana2Cheetah:
 
     def convert_to_cheetah_img(self, img):
         W_cheetah, H_cheetah = list(self.cheetah2psana_geom_dict.values())[-1][-2:]
-        cheetah_img = np.zeros((H_cheetah, W_cheetah))
+        cheetah_img = np.zeros((H_cheetah, W_cheetah), dtype = np.float32)
 
         for panel_id, (x_min, y_min, x_max, y_max) in self.cheetah2psana_geom_dict.items():
             H = y_max - y_min
@@ -732,6 +732,24 @@ class Psana2Cheetah:
             cheetah_img[y_min:y_max, x_min:x_max] = img[panel_id, 0:H, 0:W]
 
         return cheetah_img
+
+
+    def convert_to_psana_img(self, cheetah_img):
+        # Figure out channel dimension...
+        C = len(self.cheetah2psana_geom_dict)
+
+        # Figure out spatial dimension...
+        x_min, y_min, x_max, y_max = self.cheetah2psana_geom_dict[0]
+        H = y_max - y_min
+        W = x_max - x_min
+
+        # Initialize a zero value image...
+        img = np.zeros((C, H, W), dtype = np.float32)
+
+        for panel_id, (x_min, y_min, x_max, y_max) in self.cheetah2psana_geom_dict.items():
+            img[panel_id] = cheetah_img[y_min:y_max, x_min:x_max]
+
+        return img
 
 
     def convert_to_cheetah_coords(self, peaks_psana_list):
