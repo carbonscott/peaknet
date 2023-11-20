@@ -4,6 +4,8 @@ import torch.nn.functional as F
 
 from math import log
 
+from dataclasses import asdict, is_dataclass
+
 from ..configurator import Configurator
 
 from .resnet_encoder import ImageEncoder
@@ -95,6 +97,9 @@ class PeakNet(nn.Module):
         self.backbone = ImageEncoder(config = self.config.BACKBONE)
 
         # Create the adapter layer between encoder and bifpn...
+        backbone_output_channels = self.config.BACKBONE.OUTPUT_CHANNELS
+        if is_dataclass(backbone_output_channels):
+            backbone_output_channels = asdict(backbone_output_channels)
         num_bifpn_features = self.config.BIFPN.NUM_FEATURES
         self.backbone_to_bifpn = nn.ModuleList([
             nn.Conv2d(in_channels  = in_channels,
@@ -102,7 +107,7 @@ class PeakNet(nn.Module):
                       kernel_size  = 1,
                       stride       = 1,
                       padding      = 0)
-            for _, in_channels in self.config.BACKBONE.OUTPUT_CHANNELS.items()
+            for _, in_channels in backbone_output_channels.items()
         ])
 
         # Create the fusion blocks...
