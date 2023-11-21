@@ -151,11 +151,12 @@ class PeakFinder:
         return fmap_stack
 
 
-    def find_peak_w_softmax(self, img_stack, min_num_peaks = 0, uses_geom = True, returns_prediction_map = False, uses_mixed_precision = True):
+    def find_peak_w_softmax(self, img_stack, min_num_peaks = 0, uses_geom = True, returns_prediction_map = False, uses_mixed_precision = True, uses_batch_norm = False):
         peak_list = []
 
         # Normalize the image stack...
-        img_stack = (img_stack - img_stack.mean(axis = (-1, -2), keepdim = True)) / img_stack.std(axis = (-1, -2), keepdim = True)
+        norm_axis = () if uses_batch_norm else (-1, -2)
+        img_stack = (img_stack - img_stack.mean(dim = norm_axis, keepdim = True)) / img_stack.std(dim = norm_axis, keepdim = True)
 
         # Get activation feature map given the image stack...
         ## self.model.eval()
@@ -199,11 +200,12 @@ class PeakFinder:
         return ret
 
 
-    def find_peak_w_threshold(self, img_stack, min_num_peaks = 0, threshold = 0.25, uses_geom = True, returns_prediction_map = False, uses_mixed_precision = True):
+    def find_peak_w_threshold(self, img_stack, min_num_peaks = 0, threshold = 0.25, uses_geom = True, returns_prediction_map = False, uses_mixed_precision = True, uses_batch_norm = False):
         peak_list = []
 
         # Normalize the image stack...
-        img_stack = (img_stack - img_stack.mean(axis = (-1, -2), keepdim = True)) / img_stack.std(axis = (-1, -2), keepdim = True)
+        norm_axis = () if uses_batch_norm else (-1, -2)
+        img_stack = (img_stack - img_stack.mean(dim = norm_axis, keepdim = True)) / img_stack.std(dim = norm_axis, keepdim = True)
 
         # Get activation feature map given the image stack...
         ## self.model.eval()
