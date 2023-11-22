@@ -49,6 +49,12 @@ class PeakFinder:
                                    [1,1,1],
                                    [1,1,1]])
 
+        if self.config.MODEL.COMPILES:
+            if hasattr(torch, 'compile'):
+                print("Compiling the model...")
+                self.model = torch.compile(self.model) # requires PyTorch 2.0
+                print("Done compiling the model...")
+
         self.model.eval()
 
 
@@ -76,11 +82,6 @@ class PeakFinder:
         # Set device...
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         model.to(device)
-
-        if CONFIG.MODEL.COMPILES:
-            if hasattr(torch, 'compile'):
-                print("Compiling the model...")
-                model = torch.compile(model) # requires PyTorch 2.0
 
         return model, device, CONFIG
 
