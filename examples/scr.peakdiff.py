@@ -38,8 +38,8 @@ with open(config.path_m_rates.ds1, 'rb') as f:
     data = f.read()
     m_rates_dict['pyalgo'] = msgpack.unpackb(data, strict_map_key = False)
 
-# Build the data source...
-data_source = ColumnDataSource(dict(
+# Build the data source (it's pandas dataframe under the hood)...
+data_source = dict(
     events    = list(n_peaks_dict['peaknet'].keys()),
     n_peaks_x = list(n_peaks_dict['pyalgo'].values()),
     n_peaks_y = list(n_peaks_dict['peaknet'].values()),
@@ -53,7 +53,8 @@ data_source = ColumnDataSource(dict(
                  for event, m_pyalgo, m_peaknet in zip(m_rates_dict['pyalgo' ].keys(),
                                                        m_rates_dict['pyalgo' ].values(),
                                                        m_rates_dict['peaknet'].values())],
-))
+)
+data_source = ColumnDataSource(data_source)
 
 # ___/ GUI \___
 TOOLS = "box_select,lasso_select,wheel_zoom,pan,reset,help,"
