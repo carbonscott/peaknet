@@ -112,6 +112,30 @@ class PeakFinder:
         return batch_center_of_mass
 
 
+    def calc_ndimage_labels(self, img_stack, batch_mask):
+        structure = self.structure
+
+        batch_ndimage_labels = []
+
+        imgs  = cp.asarray(img_stack[:, 0])
+        masks = cp.asarray(batch_mask)
+
+        # Obtain the tensor dimension...
+        B, H, W = batch_mask.shape
+
+        batch_center_of_mass = [ [] for _ in range(B) ]
+        for i in range(B):
+            img  = imgs[i]
+            mask = masks[i]
+
+            # Fetch labels...
+            label, num_feature = ndimage.label(mask, structure = structure)
+
+            batch_ndimage_labels.append([label, num_feature])
+
+        return batch_ndimage_labels
+
+
     def calc_batch_mean_position(self, batch_mask):
         batch_mask = cp.asarray(batch_mask)
 
@@ -150,6 +174,37 @@ class PeakFinder:
                 fmap_stack = self.model(img_stack)
 
         return fmap_stack
+
+
+    def generate_ndimage_labels(self, img_stack, uses_mixed_precision = True, uses_batch_norm = False):
+        # Normalize the image stack...
+        norm_axis = () if uses_batch_norm else (-1, -2)
+        img_stack = (img_stack - img_stack.mean(dim = norm_axis, keepdim = True)) / img_stack.std(dim = norm_axis, keepdim = True)
+
+        # Get activation feature map given the image stack...
+        ## self.model.eval()
+        with torch.no_grad():
+            if uses_mixed_precision:
+                with torch.cuda.amp.autocast(dtype = torch.float16):
+                    fmap_stack = self.model(img_stack)
+            else:
+                fmap_stack = self.model(img_stack)
+
+        # Convert to probability with the softmax function...
+        mask_stack_predicted = fmap_stack.softmax(dim = 1)
+
+        B, C, H, W = mask_stack_predicted.shape
+        mask_stack_predicted = mask_stack_predicted.argmax(dim = 1, keepdims = True)
+        mask_stack_predicted = F.one_hot(mask_stack_predicted.reshape(B, -1), num_classes = C).permute(0, 2, 1).reshape(B, -1, H, W)
+        label_predicted = mask_stack_predicted[:, 1]
+        label_predicted = label_predicted.to(torch.int)
+
+        # Find center of mass for each image in the stack...
+        num_stack, size_y, size_x = label_predicted.shape
+        batch_ndimage_labels = self.calc_ndimage_labels(img_stack, label_predicted.view(num_stack, size_y, size_x))
+
+        return batch_ndimage_labels
+
 
 
     def find_peak_w_softmax(self, img_stack, min_num_peaks = 0, uses_geom = True, returns_prediction_map = False, uses_mixed_precision = True, uses_batch_norm = False):
