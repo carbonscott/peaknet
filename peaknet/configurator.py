@@ -89,7 +89,7 @@ class Configurator(dict):
         for key, value in input_dict.items():
             # Need a new dataclass node???
             if isinstance(value, dict):
-                field_type = Configurator.define_dataclass_from_dict(value, class_name = f'{key}Config')
+                field_type = Configurator.define_dataclass_from_dict(value, class_name = f'{key.capitalize()}Config')
 
             # Otherwise...
             else:
@@ -140,10 +140,10 @@ class Configurator(dict):
             return input_dict
 
 
-    def to_dataclass(self):
+    def to_dataclass(self, class_name):
         internal_dict = self.to_dict()
 
-        PeakNetConfig         = Configurator.define_dataclass_from_dict(internal_dict, 'PeakNetConfig')
-        peaknet_static_config = Configurator.instantiate_dataclass_from_dict(PeakNetConfig, internal_dict)
+        new_class     = Configurator.define_dataclass_from_dict(internal_dict, class_name)
+        static_config = Configurator.instantiate_dataclass_from_dict(new_class, internal_dict)
 
-        return peaknet_static_config
+        return static_config
