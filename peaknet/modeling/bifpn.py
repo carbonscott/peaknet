@@ -2,10 +2,9 @@ import torch
 import torch.nn            as nn
 import torch.nn.functional as F
 
-from ..configurator import Configurator
-
 from .blocks import conv2d, pool2d
 
+from .bifpn_config import BiFPNBlockConfig, BiFPNConfig
 
 class DepthwiseSeparableConv2d(nn.Module):
     """
@@ -77,20 +76,7 @@ class BiFPNBlock(nn.Module):
 
     @staticmethod
     def get_default_config():
-        CONFIG = Configurator()
-        with CONFIG.enable_auto_create():
-            CONFIG.BN.EPS            = 1e-5
-            CONFIG.BN.MOMENTUM       = 1e-1
-            CONFIG.RELU_INPLACE      = False
-            CONFIG.DOWN_SCALE_FACTOR = 0.5
-            CONFIG.UP_SCALE_FACTOR   = 2
-            CONFIG.FUSION.EPS        = 1e-5
-            CONFIG.NUM_BLOCKS        = 1
-            CONFIG.NUM_FEATURES      = 256
-            CONFIG.NUM_LEVELS        = 4
-            CONFIG.BASE_LEVEL        = 2    # ...ResNet50 uses 2, EfficientNet uses 3
-
-        return CONFIG
+        return BiFPNBlockConfig()
 
 
     def __init__(self, config = None):
@@ -218,20 +204,7 @@ class BiFPN(nn.Module):
 
     @staticmethod
     def get_default_config():
-        CONFIG = Configurator()
-        with CONFIG.enable_auto_create():
-            CONFIG.BN.EPS            = 1e-5
-            CONFIG.BN.MOMENTUM       = 1e-1
-            CONFIG.RELU_INPLACE      = False
-            CONFIG.DOWN_SCALE_FACTOR = 0.5
-            CONFIG.UP_SCALE_FACTOR   = 2
-            CONFIG.FUSION.EPS        = 1e-5
-            CONFIG.NUM_BLOCKS        = 1
-            CONFIG.NUM_FEATURES      = 256
-            CONFIG.NUM_LEVELS        = 4
-            CONFIG.BASE_LEVEL        = 2
-
-        return CONFIG
+        return BiFPNConfig()
 
 
     def __init__(self, config = None):

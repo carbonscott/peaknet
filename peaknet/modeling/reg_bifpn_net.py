@@ -4,12 +4,11 @@ import torch.nn.functional as F
 
 from math import log
 
-from dataclasses import asdict, is_dataclass
+from dataclasses import dataclass, field, asdict, is_dataclass
+from typing import List
 
-from ..configurator import Configurator
-
-from .resnet_encoder import ImageEncoder
-from .bifpn          import BiFPN, DepthwiseSeparableConv2d
+from .resnet_encoder import ImageEncoderConfig, ImageEncoder
+from .bifpn          import BiFPNConfig, BiFPN, DepthwiseSeparableConv2d
 
 
 class SegLateralLayer(nn.Module):
@@ -55,37 +54,43 @@ class SegLateralLayer(nn.Module):
 
 
 
+@dataclass
+class SegHeadConfig:
+    UP_SCALE_FACTOR: List[int] = field(
+        default_factory = lambda : [
+            ## 2,  # stem
+            4,  # layer1
+            8,  # layer2
+            16, # layer3
+            32, # layer4
+        ]
+    )
+    NUM_GROUPS           : int  = 32
+    OUT_CHANNELS         : int  = 128
+    NUM_CLASSES          : int  = 3
+    BASE_SCALE_FACTOR    : int  = 2
+    USES_LEARNED_UPSAMPLE: bool = False
+
+
+@dataclass
+class PeakNetConfig:
+    BACKBONE: ImageEncoderConfig = ImageEncoder.get_default_config()
+    BACKBONE.OUTPUT_CHANNELS = {
+        "layer1" : 256,
+        "layer2" : 512,
+        "layer3" : 1024,
+        "layer4" : 2048,
+    }
+
+    BIFPN   : BiFPNConfig   = BiFPN.get_default_config()
+    SEG_HEAD: SegHeadConfig = SegHeadConfig()
+
+
 class PeakNet(nn.Module):
 
     @staticmethod
     def get_default_config():
-        CONFIG = Configurator()
-        with CONFIG.enable_auto_create():
-            CONFIG.BACKBONE = ImageEncoder.get_default_config()
-            CONFIG.BACKBONE.OUTPUT_CHANNELS = {
-                ## "stem"   : 64,
-                "layer1" : 256,
-                "layer2" : 512,
-                "layer3" : 1024,
-                "layer4" : 2048,
-            }
-
-            CONFIG.BIFPN = BiFPN.get_default_config()
-
-            CONFIG.SEG_HEAD.UP_SCALE_FACTOR = [
-                ## 2,  # stem
-                4,  # layer1
-                8,  # layer2
-                16, # layer3
-                32, # layer4
-            ]
-            CONFIG.SEG_HEAD.NUM_GROUPS            = 32
-            CONFIG.SEG_HEAD.OUT_CHANNELS          = 128
-            CONFIG.SEG_HEAD.NUM_CLASSES           = 3
-            CONFIG.SEG_HEAD.BASE_SCALE_FACTOR     = 2
-            CONFIG.SEG_HEAD.USES_LEARNED_UPSAMPLE = False
-
-        return CONFIG
+        return PeakNetConfig()
 
 
     def __init__(self, config = None):

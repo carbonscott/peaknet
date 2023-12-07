@@ -18,9 +18,9 @@ import torch
 import torch.nn            as nn
 import torch.nn.functional as F
 
-from ..configurator import Configurator
-
 from .blocks import conv2d, pool2d
+
+from .regnet_config import ResStemConfig, ResBlockConfig, ResStageConfig, ResNet50Config
 
 
 class ResStem(nn.Module):
@@ -39,13 +39,7 @@ class ResStem(nn.Module):
 
     @staticmethod
     def get_default_config():
-        CONFIG = Configurator()
-        with CONFIG.enable_auto_create():
-            CONFIG.BN.EPS       = 1e-5
-            CONFIG.BN.MOMENTUM  = 1e-1
-            CONFIG.RELU_INPLACE = False
-
-        return CONFIG
+        return ResStemConfig()
 
 
     def __init__(self, stem_in_channels, stem_out_channels, config = None):
@@ -82,14 +76,7 @@ class ResBlock(nn.Module):
 
     @staticmethod
     def get_default_config():
-        CONFIG = Configurator()
-        with CONFIG.enable_auto_create():
-            CONFIG.BN.EPS       = 1e-5
-            CONFIG.BN.MOMENTUM  = 1e-1
-            CONFIG.RELU_INPLACE = False
-            CONFIG.USES_RES_V1p5 = True
-
-        return CONFIG
+        return ResBlockConfig()
 
 
     def __init__(self, block_in_channels,
@@ -175,7 +162,7 @@ class ResStage(nn.Module):
 
     @staticmethod
     def get_default_config():
-        return ResBlock.get_default_config()
+        return ResStageConfig()
 
     def __init__(self, stage_in_channels,
                        stage_out_channels,
@@ -204,7 +191,7 @@ class ResStage(nn.Module):
                 mid_conv_stride    = mid_conv_stride   if block_idx == 0 else 1,
 
                 # Other config...
-                config = self.config
+                config = self.config.RESBLOCK
             )
             for block_idx in range(num_blocks)
         ])
@@ -231,14 +218,7 @@ class ResNet50(nn.Module):
 
     @staticmethod
     def get_default_config():
-        CONFIG = Configurator()
-        with CONFIG.enable_auto_create():
-            CONFIG.RESSTEM  = ResStem.get_default_config()
-            CONFIG.RESSTAGE = ResStage.get_default_config()
-
-            CONFIG.USES_RES_V1p5 = True
-
-        return CONFIG
+        return ResNet50Config()
 
 
     def __init__(self, config = None):
@@ -276,8 +256,8 @@ class ResNet50(nn.Module):
         mid_conv_channels  = 128
         num_stages         = 1
         num_blocks         = 4
-        in_conv_stride     = 1 if self.config.USES_RES_V1p5 else 2
-        mid_conv_stride    = 2 if self.config.USES_RES_V1p5 else 1
+        in_conv_stride     = 1 if self.config.RESSTAGE.RESBLOCK.USES_RES_V1p5 else 2
+        mid_conv_stride    = 2 if self.config.RESSTAGE.RESBLOCK.USES_RES_V1p5 else 1
         self.layer2 = nn.Sequential(*[
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
@@ -296,8 +276,8 @@ class ResNet50(nn.Module):
         mid_conv_channels  = 256
         num_stages         = 1
         num_blocks         = 6
-        in_conv_stride     = 1 if self.config.USES_RES_V1p5 else 2
-        mid_conv_stride    = 2 if self.config.USES_RES_V1p5 else 1
+        in_conv_stride     = 1 if self.config.RESSTAGE.RESBLOCK.USES_RES_V1p5 else 2
+        mid_conv_stride    = 2 if self.config.RESSTAGE.RESBLOCK.USES_RES_V1p5 else 1
         self.layer3 = nn.Sequential(*[
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,
@@ -316,8 +296,8 @@ class ResNet50(nn.Module):
         mid_conv_channels  = 512
         num_stages         = 1
         num_blocks         = 3
-        in_conv_stride     = 1 if self.config.USES_RES_V1p5 else 2
-        mid_conv_stride    = 2 if self.config.USES_RES_V1p5 else 1
+        in_conv_stride     = 1 if self.config.RESSTAGE.RESBLOCK.USES_RES_V1p5 else 2
+        mid_conv_stride    = 2 if self.config.RESSTAGE.RESBLOCK.USES_RES_V1p5 else 1
         self.layer4 = nn.Sequential(*[
             ResStage(stage_in_channels  = stage_in_channels if stage_idx == 0 else stage_out_channels,
                      stage_out_channels = stage_out_channels,

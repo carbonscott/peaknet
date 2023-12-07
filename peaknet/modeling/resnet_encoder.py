@@ -1,28 +1,43 @@
 import torch
 import torch.nn as nn
 
-from ..configurator import Configurator
+from dataclasses import dataclass, field
 
-from .regnet import ResNet50
+from typing import Dict
+
+from .regnet import ResNet50Config, ResNet50
+
+
+@dataclass
+class ImageEncoderConfig:
+    RESNET50: ResNet50Config = ResNet50.get_default_config()
+
+    SAVES_FEATURE_AT_LAYER: Dict[str, bool] = field(
+        default_factory = lambda : {
+            "stem"   : False,
+            "layer1" : True,
+            "layer2" : True,
+            "layer3" : True,
+            "layer4" : True,
+        }
+    )
+
+    OUTPUT_CHANNELS: Dict[str, int] = field(
+        default_factory = lambda : {
+            "stem"   : 64,
+            "layer1" : 256,
+            "layer2" : 512,
+            "layer3" : 1024,
+            "layer4" : 2048,
+        }
+    )
 
 
 class ImageEncoder(nn.Module):
 
     @staticmethod
     def get_default_config():
-        CONFIG = Configurator()
-        with CONFIG.enable_auto_create():
-            CONFIG = ResNet50.get_default_config()
-
-            CONFIG.SAVES_FEATURE_AT_LAYER = {
-                "stem"   : False,
-                "layer1" : True,
-                "layer2" : True,
-                "layer3" : True,
-                "layer4" : True,
-            }
-
-        return CONFIG
+        return ImageEncoderConfig()
 
 
     def __init__(self, config = None):
@@ -31,7 +46,7 @@ class ImageEncoder(nn.Module):
         self.config = ImageEncoder.get_default_config() if config is None else config
 
         # Use the ResNet50 as the encoder...
-        self.encoder = ResNet50(config = config)
+        self.encoder = ResNet50(config = config.RESNET50)
 
 
     def forward(self, x):

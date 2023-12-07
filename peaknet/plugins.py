@@ -1,9 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-import pickle
-import numpy as np
 import cupy  as cp
+import numpy as np
+import pickle
 import regex
 
 import torch
