@@ -16,7 +16,7 @@ from cupyx.scipy import ndimage
 
 from .modeling.reg_bifpn_net import PeakNet
 
-from .configurator import Configurator
+from peaknet.configurator import make_config_from_dict
 
 
 class PeakFinder:
@@ -61,7 +61,7 @@ class PeakFinder:
     def config_model(self, path_yaml = None):
         with open(path_yaml, 'r') as fh:
             config_dict = yaml.safe_load(fh)
-        CONFIG = Configurator.from_dict(config_dict)
+        CONFIG = make_config_from_dict(config_dict)
 
         # ...Model
         bifpn_num_blocks    = CONFIG.MODEL.BIFPN.NUM_BLOCKS
