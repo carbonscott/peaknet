@@ -1,12 +1,12 @@
-from ..plugins import apply_mask
-from ..utils   import split_dataset
-
 import os
 import csv
 import h5py
 import random
 import numpy as np
 import logging
+
+from ..plugins import apply_mask
+from ..utils   import split_dataset
 
 from torch.utils.data import Dataset
 
