@@ -3,13 +3,13 @@
 
 import os
 import yaml
-import logging
 import socket
 import tqdm
 import signal
 import numpy as np
 import h5py
 import argparse
+import logging
 
 import torch
 import torch.nn as nn
@@ -20,11 +20,13 @@ import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
+from dataclasses import asdict
+
+from peaknet.configurator           import make_config_from_dict
 from peaknet.datasets.CXI           import CXIManager, CXIDataset
 from peaknet.modeling.reg_bifpn_net import PeakNet
 from peaknet.criterion              import CategoricalFocalLoss
 from peaknet.utils                  import init_logger, split_dataset, save_checkpoint, load_checkpoint, set_seed, init_weights
-from peaknet.configurator           import Configurator
 from peaknet.lr_scheduler           import CosineLRScheduler
 
 from peaknet.trans import RandomShift,  \
@@ -49,7 +51,7 @@ args = parser.parse_args()
 fl_yaml = args.yaml_file
 with open(fl_yaml, 'r') as fh:
     config_dict = yaml.safe_load(fh)
-CONFIG = Configurator.from_dict(config_dict)
+CONFIG = make_config_from_dict(config_dict, "TrainingConfig")
 
 # ...Checkpoint
 drc_chkpt           = CONFIG.CHKPT.DIRECTORY
@@ -126,7 +128,10 @@ if uses_ddp:
     ddp_rank       = int(os.environ["RANK"      ])
     ddp_local_rank = int(os.environ["LOCAL_RANK"])
     ddp_world_size = int(os.environ["WORLD_SIZE"])
-    dist.init_process_group(backend=ddp_backend, rank = ddp_rank, world_size = ddp_world_size, init_method = "env://")
+    dist.init_process_group(backend=ddp_backend,
+                            rank = ddp_rank,
+                            world_size = ddp_world_size,
+                            init_method = "env://",)
     print(f"RANK:{ddp_rank},LOCAL_RANK:{ddp_local_rank},WORLD_SIZE:{ddp_world_size}")
 else:
     ddp_rank       = 0
@@ -150,7 +155,7 @@ if ddp_rank == 0:
     timestamp = init_logger(fl_prefix = fl_log_prefix, drc_log = drc_log, returns_timestamp = True)
 
     # Convert dictionary to yaml formatted string...
-    config_dict = CONFIG.to_dict()
+    config_dict = asdict(CONFIG)
     config_yaml = yaml.dump(config_dict)
 
     # Log the config...
