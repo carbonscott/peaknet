@@ -6,7 +6,7 @@ class Configurator(dict):
 
     Reference: https://github.com/facebookresearch/Detectron/blob/main/detectron/utils/collections.py
     """
-    __auto_create = False
+    __auto_create = False    # it is `_Configurator__auto_create` under the hood (name mangling)
 
     def __getattr__(self, attr):
         if attr not in self:
@@ -21,8 +21,10 @@ class Configurator(dict):
 
 
     def __setattr__(self, attr, value):
-        if attr == "_Configurator__auto_create":  # Use name mangling for private attributes
-            raise AttributeError("'_auto_create' is read-only!")
+        # Try to change __auto_create outside the class???
+        if attr == "_Configurator__auto_create":
+            raise AttributeError("'__auto_create' is read-only!")
+
         self[attr] = value    # Using __setitem__ under the hood
 
 
@@ -37,6 +39,9 @@ class Configurator(dict):
 
 
     def to_dict(self):
+        """
+        Hierarchically change all nodes to a dictionary.
+        """
         result = {}
         for key, value in self.items():
             if isinstance(value, Configurator):
@@ -48,6 +53,9 @@ class Configurator(dict):
 
     @classmethod
     def from_dict(cls, data):
+        """
+        Recursively create all nodes from a dictionary.
+        """
         instance = cls()
         for key, value in data.items():
             if isinstance(value, dict):
