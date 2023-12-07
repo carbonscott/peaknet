@@ -78,7 +78,7 @@ def instantiate_dataclass_from_dict(custom_dataclass, input_dict):
         return input_dict
 
 
-def config_from_dict(input_dict, class_name):
+def make_config_from_dict(input_dict, class_name):
     new_class     = define_dataclass_from_dict(input_dict, class_name)
     static_config = instantiate_dataclass_from_dict(new_class, input_dict)
 
