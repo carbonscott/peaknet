@@ -20,9 +20,7 @@ import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
-from dataclasses import asdict
-
-from peaknet.configurator           import make_config_from_dict
+from peaknet.configurator           import Configurator
 from peaknet.datasets.CXI           import CXIManager, CXIDataset
 from peaknet.modeling.reg_bifpn_net import PeakNet
 from peaknet.criterion              import CategoricalFocalLoss
@@ -51,7 +49,7 @@ args = parser.parse_args()
 fl_yaml = args.yaml_file
 with open(fl_yaml, 'r') as fh:
     config_dict = yaml.safe_load(fh)
-CONFIG = make_config_from_dict(config_dict, "TrainingConfig")
+CONFIG = Configurator.from_dict(config_dict)
 
 # ...Checkpoint
 drc_chkpt           = CONFIG.CHKPT.DIRECTORY
@@ -155,7 +153,7 @@ if ddp_rank == 0:
     timestamp = init_logger(fl_prefix = fl_log_prefix, drc_log = drc_log, returns_timestamp = True)
 
     # Convert dictionary to yaml formatted string...
-    config_dict = asdict(CONFIG)
+    config_dict = CONFIG.to_dict()
     config_yaml = yaml.dump(config_dict)
 
     # Log the config...
