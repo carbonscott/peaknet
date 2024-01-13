@@ -25,16 +25,31 @@ class SFXInferenceDataset(Dataset):
         self.img_mode      = img_mode
         self.event_list    = event_list
 
-        # Define the Psana image handle...
-        self.psana_img = PsanaImg(exp, run, mode, detector_name)
+        self.psana_img      = None
+        self.bad_pixel_mask = None
+
+
+    def _initialize_psana(self):
+        exp           = self.exp
+        run           = self.run
+        mode          = self.mode
+        detector_name = self.detector_name
+
+        self.psana_img      = PsanaImg(exp, run, mode, detector_name)
         self.bad_pixel_mask = self.psana_img.create_bad_pixel_mask()
 
 
     def __len__(self):
+        if self.psana_img is None:
+            self._initialize_psana()
+
         return len(self.psana_img) if self.event_list is None else len(self.event_list)
 
 
     def __getitem__(self, idx):
+        if self.psana_img is None:
+            self._initialize_psana()
+
         # Fetch the event based on idx...
         event = idx if self.event_list is None else self.event_list[idx]
 
