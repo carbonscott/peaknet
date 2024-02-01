@@ -100,7 +100,12 @@ class CheetahConverter:
         """)
         cheetah2psana_geom_dict = {}
         for panel_str, (x_min, y_min, x_max, y_max) in cheetah_geom_dict.items():
-            capture_dict = cheetah_geom_regex.match(panel_str).capturesdict()
+            match = cheetah_geom_regex.match(panel_str)
+            if match is None:
+                continue
+
+            capture_dict = match.capturesdict()
+
             panel_id = capture_dict['PANEL'][0]
             asic_id  = capture_dict['ASIC' ][0]
 
