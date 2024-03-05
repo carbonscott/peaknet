@@ -2,8 +2,6 @@ import torch
 import torch.nn            as nn
 import torch.nn.functional as F
 
-from .blocks import conv2d, pool2d
-
 from .bifpn_config import BiFPNBlockConfig, BiFPNConfig
 
 class DepthwiseSeparableConv2d(nn.Module):
