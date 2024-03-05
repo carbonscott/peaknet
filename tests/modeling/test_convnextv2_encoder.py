@@ -2,7 +2,6 @@ import pytest
 import torch
 import numpy as np
 from peaknet.modeling.convnextv2_encoder import ConvNextV2Backbone, ConvNextV2BackboneConfig
-from peaknet.trans import Resize
 
 @pytest.mark.parametrize("model_name", ConvNextV2Backbone.show_supported_models())
 def test_model_support(model_name):
