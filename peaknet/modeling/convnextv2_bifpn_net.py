@@ -54,8 +54,6 @@ class SegLateralLayer(nn.Module):
         return x
 
 
-
-
 @dataclass
 class SegHeadConfig:
     UP_SCALE_FACTOR: List[int] = field(
