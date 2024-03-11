@@ -48,7 +48,7 @@ class Pad:
         self.size_x = size_x
 
 
-    def __call__(self, img):
+    def calc_pad_width(self, img):
         size_y = self.size_y
         size_x = self.size_x
 
@@ -62,6 +62,11 @@ class Pad:
             (dx_padded // 2, dx_padded - dx_padded // 2),
         )
 
+        return pad_width
+
+
+    def __call__(self, img):
+        pad_width  = self.calc_pad_width(img)
         img_padded = np.pad(img, pad_width = pad_width, mode = 'constant', constant_values = 0)
 
         return img_padded
@@ -120,6 +125,43 @@ class Resize:
         return img_resize
 
 
+
+
+class PadResize:
+    def __init__(self, H, W, anti_aliasing = True):
+        self.H = H
+        self.W = W
+        self.anti_aliasing = anti_aliasing
+
+    def get_intermediates(self, img):
+        H = self.H
+        W = self.W
+        anti_aliasing = self.anti_aliasing
+
+        H_img, W_img = img.shape[-2:]
+        H_pad, W_pad = (H_img // H + 1) * H, (W_img // W + 1) * W
+
+        padder = Pad(H_pad, W_pad)
+        pad_width = padder.calc_pad_width(img)
+
+        return H_pad, W_pad, pad_width
+
+
+    def __call__(self, img):
+        H = self.H
+        W = self.W
+        anti_aliasing = self.anti_aliasing
+
+        H_img, W_img = img.shape[-2:]
+        H_pad, W_pad = (H_img // H + 1) * H, (W_img // W + 1) * W
+
+        padder     = Pad(H_pad, W_pad)
+        img_padded = padder(img)
+
+        resizer    = Resize(H, W, anti_aliasing)
+        img_resize = resizer(img_padded)
+
+        return img_resize
 
 
 ## class Downsample:
