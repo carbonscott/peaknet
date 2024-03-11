@@ -10,8 +10,10 @@ class PeakNetDatasetLoader:
     The data distribution should be handled externally (like how you construct
     the csv).
     """
-    def __init__(self, path_csv):
+    def __init__(self, path_csv, trans_list = None):
         super().__init__()
+
+        self.trans_list = trans_list
 
         # Importing data from csv...
         self.data_list = []
@@ -59,14 +61,25 @@ class PeakNetDatasetLoader:
         detector_image[pixel_map_x, pixel_map_y, pixel_map_z] = image
         detector_label[pixel_map_x, pixel_map_y, pixel_map_z] = label
 
-        detector_image = detector_image[None,].transpose((0, 3, 1, 2))    # (H, W, C) -> (B, H, W, C) -> (B, C, H, W)
-        detector_label = detector_label[None,].transpose((0, 3, 1, 2))    # (H, W, C) -> (B, H, W, C) -> (B, C, H, W)
+        detector_image = detector_image.transpose((2, 0, 1))    # (H, W, C=1) -> (C, H, W)
+        detector_label = detector_label.transpose((2, 0, 1))    # (H, W, C=1) -> (C, H, W)
 
         return detector_image, detector_label
 
 
     def __getitem__(self, idx):
-        return self.get_img(idx)
+        img, label = self.get_img(idx)
+
+        # Apply transformation to image and label at the same time...
+        if self.trans_list is not None:
+            data = np.concatenate([img, label], axis = 0)    # (2, H, W)
+            for trans in self.trans_list:
+                data = trans(data)
+
+            img   = data[0:1]    # (1, H, W)
+            label = data[1: ]    # (1, H, W)
+
+        return img, label
 
 
     def __len__(self):
