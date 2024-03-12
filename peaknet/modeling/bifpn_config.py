@@ -26,4 +26,4 @@ class BiFPNBlockConfig:
 @dataclass
 class BiFPNConfig:
     num_blocks: int = 1
-    block_config: BiFPNBlockConfig = BiFPNBlockConfig()
+    block     : BiFPNBlockConfig = BiFPNBlockConfig()

@@ -9,9 +9,9 @@ from typing import List, Dict, Optional
 
 from .convnextv2_encoder import ConvNextV2BackboneConfig, ConvNextV2Backbone
 
-from bifpn.bifpn        import BiFPN
-from bifpn.bifpn_config import BiFPNConfig
-from bifpn.utils_build  import BackboneToBiFPNAdapterConfig, BackboneToBiFPNAdapter
+from .bifpn        import BiFPN
+from .bifpn_config import BiFPNConfig
+from .utils_build  import BackboneToBiFPNAdapterConfig, BackboneToBiFPNAdapter
 
 class SegLateralLayer(nn.Module):
 
@@ -73,9 +73,10 @@ class SegHeadConfig:
 
 @dataclass
 class PeakNetConfig:
-    backbone: ConvNextV2BackboneConfig = ConvNextV2Backbone.get_default_config()
-    bifpn   : BiFPNConfig              = BiFPN.get_default_config()
-    seg_head: SegHeadConfig            = SegHeadConfig()
+    backbone          : ConvNextV2BackboneConfig = ConvNextV2Backbone.get_default_config()
+    bifpn             : BiFPNConfig              = BiFPN.get_default_config()
+    seg_head          : SegHeadConfig            = SegHeadConfig()
+    channels_in_stages: Optional[Dict[str, int]] = None
 
 
 class PeakNet(nn.Module):
@@ -125,7 +126,7 @@ class PeakNet(nn.Module):
             backbone_output_channels = PeakNet.estimate_output_channels(backbone_config.model_name)
 
         # Create the adapter layer between encoder and bifpn...
-        num_bifpn_features = self.config.bifpn.num_features
+        num_bifpn_features = self.config.bifpn.block.num_features
         self.backbone_to_bifpn = nn.ModuleList([
             nn.Conv2d(in_channels  = in_channels,
                       out_channels = num_bifpn_features,
@@ -142,7 +143,7 @@ class PeakNet(nn.Module):
         base_scale_factor         = self.config.seg_head.base_scale_factor
         max_scale_factor          = self.config.seg_head.up_scale_factor[0]
         num_upscale_layer_list    = [ int(log(i/max_scale_factor)/log(2)) for i in self.config.seg_head.up_scale_factor ]
-        lateral_layer_in_channels = self.config.bifpn.num_features
+        lateral_layer_in_channels = self.config.bifpn.block.num_features
         self.seg_lateral_layers = nn.ModuleList([
             # Might need to reverse the order (pay attention to the order in the bifpn output)
             SegLateralLayer(in_channels       = lateral_layer_in_channels,

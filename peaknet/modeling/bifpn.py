@@ -212,7 +212,7 @@ class BiFPN(nn.Module):
 
         num_blocks = self.config.num_blocks
         self.blocks = nn.Sequential(*[
-            BiFPNBlock(config = self.config.block_config)
+            BiFPNBlock(config = self.config.block)
             for block_idx in range(num_blocks)
         ])
 
