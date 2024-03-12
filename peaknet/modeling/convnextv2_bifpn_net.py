@@ -115,17 +115,17 @@ class PeakNet(nn.Module):
         self.config = PeakNet.get_default_config() if config is None else config
 
         # Create the image encoder...
-        backbone_config = self.config.BACKBONE
+        backbone_config = self.config.backbone
         self.backbone = ConvNextV2Backbone(config = backbone_config)
 
         # Adjust dependent settings based on the chosen pre-trained model...
         # ...Estimate the output channels
-        backbone_output_channels = self.config.CHANNELS_IN_STAGES
+        backbone_output_channels = self.config.channels_in_stages
         if backbone_output_channels is None:
             backbone_output_channels = PeakNet.estimate_output_channels(backbone_config.model_name)
 
         # Create the adapter layer between encoder and bifpn...
-        num_bifpn_features = self.config.BIFPN.NUM_FEATURES
+        num_bifpn_features = self.config.bifpn.num_features
         self.backbone_to_bifpn = nn.ModuleList([
             nn.Conv2d(in_channels  = in_channels,
                       out_channels = num_bifpn_features,
@@ -136,31 +136,31 @@ class PeakNet(nn.Module):
         ])
 
         # Create the fusion blocks...
-        self.bifpn = BiFPN(config = self.config.BIFPN)
+        self.bifpn = BiFPN(config = self.config.bifpn)
 
         # Create the prediction head...
-        base_scale_factor         = self.config.SEG_HEAD.BASE_SCALE_FACTOR
-        max_scale_factor          = self.config.SEG_HEAD.UP_SCALE_FACTOR[0]
-        num_upscale_layer_list    = [ int(log(i/max_scale_factor)/log(2)) for i in self.config.SEG_HEAD.UP_SCALE_FACTOR ]
-        lateral_layer_in_channels = self.config.BIFPN.NUM_FEATURES
+        base_scale_factor         = self.config.seg_head.base_scale_factor
+        max_scale_factor          = self.config.seg_head.up_scale_factor[0]
+        num_upscale_layer_list    = [ int(log(i/max_scale_factor)/log(2)) for i in self.config.seg_head.up_scale_factor ]
+        lateral_layer_in_channels = self.config.bifpn.num_features
         self.seg_lateral_layers = nn.ModuleList([
             # Might need to reverse the order (pay attention to the order in the bifpn output)
             SegLateralLayer(in_channels       = lateral_layer_in_channels,
-                            out_channels      = self.config.SEG_HEAD.OUT_CHANNELS,
-                            num_groups        = self.config.SEG_HEAD.NUM_GROUPS,
+                            out_channels      = self.config.seg_head.out_channels,
+                            num_groups        = self.config.seg_head.num_groups,
                             num_layers        = num_upscale_layers,
                             base_scale_factor = base_scale_factor)
             for num_upscale_layers in num_upscale_layer_list
         ])
 
-        self.head_segmask  = nn.Conv2d(in_channels  = self.config.SEG_HEAD.OUT_CHANNELS,
-                                       out_channels = self.config.SEG_HEAD.NUM_CLASSES,
+        self.head_segmask  = nn.Conv2d(in_channels  = self.config.seg_head.out_channels,
+                                       out_channels = self.config.seg_head.num_classes,
                                        kernel_size  = 1,
                                        padding      = 0,)
 
-        if self.config.SEG_HEAD.USES_LEARNED_UPSAMPLE:
-            self.head_upsample_layer = nn.ConvTranspose2d(in_channels  = self.config.SEG_HEAD.NUM_CLASSES,
-                                                          out_channels = self.config.SEG_HEAD.NUM_CLASSES,
+        if self.config.seg_head.uses_learned_upsample:
+            self.head_upsample_layer = nn.ConvTranspose2d(in_channels  = self.config.seg_head.num_classes,
+                                                          out_channels = self.config.seg_head.num_classes,
                                                           kernel_size  = 6,
                                                           stride       = 4,
                                                           padding      = 1,)
@@ -207,7 +207,7 @@ class PeakNet(nn.Module):
                                  scale_factor  = self.max_scale_factor,
                                  mode          = 'bilinear',
                                  align_corners = False)                   \
-                   if not self.config.SEG_HEAD.USES_LEARNED_UPSAMPLE else \
+                   if not self.config.seg_head.uses_learned_upsample else \
                    self.head_upsample_layer(pred_map)
 
         return pred_map
