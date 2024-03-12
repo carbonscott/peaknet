@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import os
+
 from math import log
 
 from dataclasses import dataclass, field, asdict, is_dataclass
@@ -87,7 +89,8 @@ class PeakNet(nn.Module):
 
     @staticmethod
     def estimate_output_channels(model_name):
-        device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+        local_rank = os.environ.get("LOCAL_RANK", 0)
+        device = f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu'
 
         B, C, H, W = 2, 1, 1*(2**4)*4, 1*(2**4)*4
         batch_input = torch.rand(B, C, H, W, dtype = torch.float, device = device)
