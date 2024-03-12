@@ -56,7 +56,7 @@ class SegLateralLayer(nn.Module):
 
 @dataclass
 class SegHeadConfig:
-    UP_SCALE_FACTOR: List[int] = field(
+    up_scale_factor: List[int] = field(
         default_factory = lambda : [
             4,  # stage0
             8,  # stage1
@@ -64,19 +64,18 @@ class SegHeadConfig:
             32, # stage3
         ]
     )
-    NUM_GROUPS           : int  = 32
-    OUT_CHANNELS         : int  = 256
-    NUM_CLASSES          : int  = 2
-    BASE_SCALE_FACTOR    : int  = 2
-    USES_LEARNED_UPSAMPLE: bool = False
+    num_groups           : int  = 32
+    out_channels         : int  = 256
+    num_classes          : int  = 2
+    base_scale_factor    : int  = 2
+    uses_learned_upsample: bool = False
 
 
 @dataclass
 class PeakNetConfig:
-    BACKBONE           : ConvNextV2BackboneConfig = ConvNextV2Backbone.get_default_config()
-    BIFPN              : BiFPNConfig              = BiFPN.get_default_config()
-    SEG_HEAD           : SegHeadConfig            = SegHeadConfig()
-    CHANNELS_IN_STAGES : Optional[Dict[str, int]] = None
+    backbone: ConvNextV2BackboneConfig = ConvNextV2Backbone.get_default_config()
+    bifpn   : BiFPNConfig              = BiFPN.get_default_config()
+    seg_head: SegHeadConfig            = SegHeadConfig()
 
 
 class PeakNet(nn.Module):
