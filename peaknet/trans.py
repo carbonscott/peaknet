@@ -4,7 +4,7 @@ import random
 
 import torch.nn.functional as F
 
-from skimage.transform import resize
+from skimage.transform import resize, resize_local_mean, downscale_local_mean
 from scipy.ndimage     import rotate
 
 
@@ -107,10 +107,11 @@ class Crop:
 
 
 class Resize:
-    def __init__(self, size_y, size_x, anti_aliasing = True):
-        self.size_y        = size_y
-        self.size_x        = size_x
-        self.anti_aliasing = anti_aliasing
+    def __init__(self, size_y, size_x, anti_aliasing = True, uses_interpolation = False):
+        self.size_y             = size_y
+        self.size_x             = size_x
+        self.anti_aliasing      = anti_aliasing
+        self.uses_interpolation = uses_interpolation
 
 
     def __call__(self, img):
@@ -120,7 +121,30 @@ class Resize:
 
         B = img.shape[0]
 
-        img_resize = resize(img, (B, size_y, size_x), anti_aliasing = anti_aliasing)
+        if self.uses_interpolation:
+            img_resize = resize(img, (B, size_y, size_x), anti_aliasing = anti_aliasing)
+        else:
+            img_resize = resize_local_mean(img, (B, size_y, size_x), grid_mode = True)
+
+        return img_resize
+
+
+
+
+class Downsize:
+    def __init__(self, H, W):
+        self.H = H
+        self.W = W
+
+
+    def __call__(self, img):
+        H = self.H
+        W = self.W
+
+        B, H_img, W_img = img.shape
+
+        factors = (1, H_img // H, W_img // W)
+        img_resize = downscale_local_mean(img, factors)
 
         return img_resize
 
@@ -128,10 +152,11 @@ class Resize:
 
 
 class PadResize:
-    def __init__(self, H, W, anti_aliasing = True):
+    def __init__(self, H, W, anti_aliasing = True, uses_interpolation = False):
         self.H = H
         self.W = W
-        self.anti_aliasing = anti_aliasing
+        self.anti_aliasing      = anti_aliasing
+        self.uses_interpolation = uses_interpolation
 
     def get_intermediates(self, img):
         H = self.H
@@ -150,7 +175,8 @@ class PadResize:
     def __call__(self, img):
         H = self.H
         W = self.W
-        anti_aliasing = self.anti_aliasing
+        anti_aliasing      = self.anti_aliasing
+        uses_interpolation = self.uses_interpolation
 
         H_img, W_img = img.shape[-2:]
         H_pad, W_pad = (H_img // H + 1) * H, (W_img // W + 1) * W
@@ -158,8 +184,42 @@ class PadResize:
         padder     = Pad(H_pad, W_pad)
         img_padded = padder(img)
 
-        resizer    = Resize(H, W, anti_aliasing)
+        resizer    = Resize(H, W, anti_aliasing = anti_aliasing, uses_interpolation = uses_interpolation)
         img_resize = resizer(img_padded)
+
+        return img_resize
+
+
+class PadDownsize:
+    def __init__(self, H, W):
+        self.H = H
+        self.W = W
+
+    def get_intermediates(self, img):
+        H = self.H
+        W = self.W
+
+        H_img, W_img = img.shape[-2:]
+        H_pad, W_pad = (H_img // H + 1) * H, (W_img // W + 1) * W
+
+        padder = Pad(H_pad, W_pad)
+        pad_width = padder.calc_pad_width(img)
+
+        return H_pad, W_pad, pad_width
+
+
+    def __call__(self, img):
+        H = self.H
+        W = self.W
+
+        H_img, W_img = img.shape[-2:]
+        H_pad, W_pad = (H_img // H + 1) * H, (W_img // W + 1) * W
+
+        padder     = Pad(H_pad, W_pad)
+        img_padded = padder(img)
+
+        downsizer = Downsize(H, W)
+        img_resize = downsizer(img_padded)
 
         return img_resize
 
