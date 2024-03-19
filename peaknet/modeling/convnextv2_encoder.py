@@ -69,6 +69,8 @@ class ConvNextV2Backbone(nn.Module):
         model.stem[0]             = nn.Conv2d(in_channels, out_channels, kernel_size = kernel_size, stride = stride)
         model.stem[0].weight.data = ave_weight_patch_embd
 
+        model.head = nn.Identity()    # Remove unsed parameters to save memory
+
         self.stem   = model.stem
         self.stages = model.stages
 
