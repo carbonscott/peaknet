@@ -131,3 +131,48 @@ class RandomRotate:
         img_rot = img_rot.to(original_dtype)
 
         return img_rot
+
+
+class RandomShift:
+    def __init__(self, frac_y_shift_max=0.01, frac_x_shift_max=0.01):
+        self.frac_y_shift_max = frac_y_shift_max
+        self.frac_x_shift_max = frac_x_shift_max
+
+    def __call__(self, img, verbose=False):
+        frac_y_shift_max = self.frac_y_shift_max
+        frac_x_shift_max = self.frac_x_shift_max
+
+        B, C, H, W = img.size()
+
+        # Draw a random value for shifting along x and y, respectively...
+        y_shift_abs_max = H * frac_y_shift_max
+        y_shift = random.uniform(-y_shift_abs_max, y_shift_abs_max)
+        y_shift = int(y_shift)
+
+        x_shift_abs_max = W * frac_x_shift_max
+        x_shift = random.uniform(-x_shift_abs_max, x_shift_abs_max)
+        x_shift = int(x_shift)
+
+        # Construct a super tensor by padding (with zero) the absolute y and x shift...
+        size_super_y = H + 2 * abs(y_shift)
+        size_super_x = W + 2 * abs(x_shift)
+        super_tensor = torch.zeros(B, C, size_super_y, size_super_x, device=img.device, dtype=img.dtype)
+
+        # Move the image to the target area...
+        target_y_min = abs(y_shift) + y_shift
+        target_x_min = abs(x_shift) + x_shift
+        target_y_max = H + target_y_min
+        target_x_max = W + target_x_min
+        super_tensor[:, :, target_y_min:target_y_max, target_x_min:target_x_max] = img
+
+        # Crop super tensor...
+        crop_y_min = abs(y_shift)
+        crop_x_min = abs(x_shift)
+        crop_y_max = H + crop_y_min
+        crop_x_max = W + crop_x_min
+        crop = super_tensor[:, :, crop_y_min:crop_y_max, crop_x_min:crop_x_max]
+
+        if verbose:
+            print(f"y-shift = {y_shift}, x-shift = {x_shift}")
+
+        return crop
