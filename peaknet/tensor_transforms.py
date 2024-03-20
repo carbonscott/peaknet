@@ -2,6 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import torchvision
+from torchvision.transforms.functional import rotate
+
+import random
+
 '''
 Batch augmentation.
 
@@ -53,8 +58,6 @@ class DownscaleLocalMean:
 
 
 class RandomPatch:
-    """ Randomly place num_patch patches with the size of H * W onto an image.
-    """
     def __init__(self, num_patch,
                        H_patch,
                        W_patch,
@@ -107,3 +110,24 @@ class RandomPatch:
         output = img_masked if not returns_mask else (img_masked, mask)
 
         return output
+
+
+
+class RandomRotate:
+    def __init__(self, angle_max=360):
+        self.angle_max = angle_max
+
+    def __call__(self, img):
+        angle = random.uniform(0, self.angle_max)
+
+        original_dtype = img.dtype
+        if img.dtype != torch.float32:
+            img = img.to(torch.float32)
+
+        img_rot = rotate(img,
+                         angle         = angle,
+                         interpolation = torchvision.transforms.InterpolationMode.BILINEAR)
+
+        img_rot = img_rot.to(original_dtype)
+
+        return img_rot
