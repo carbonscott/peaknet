@@ -6,7 +6,7 @@ from ..perf import Timer
 
 from torch.utils.data import Dataset
 
-class PeakNetDatasetLoader:
+class PeakNetDatasetLoader(Dataset):
     """
     This class only loads events sequentially saved in a list of hdf5 files
     The data distribution should be handled externally (like how you construct
