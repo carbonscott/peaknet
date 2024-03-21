@@ -20,18 +20,15 @@ import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
-from peaknet.datasets.peaknet_dataset      import PeakNetDatasetLoader
+from peaknet.datasets.safetensors_dataset  import PeakNetDataset
 from peaknet.modeling.convnextv2_bifpn_net import PeakNetConfig, PeakNet, SegHeadConfig
 from peaknet.modeling.convnextv2_encoder   import ConvNextV2BackboneConfig
 from peaknet.modeling.bifpn_config         import BiFPNConfig, BiFPNBlockConfig, BNConfig, FusionConfig
 from peaknet.criterion                     import CategoricalFocalLoss
 from peaknet.utils                         import init_logger, split_dataset, save_checkpoint, load_checkpoint, set_seed, init_weights
 from peaknet.lr_scheduler                  import CosineLRScheduler
-
-from peaknet.trans import RandomShift,  \
-                          RandomRotate, \
-                          RandomPatch,  \
-                          PadResize
+from peaknet.perf                          import Timer
+from peaknet.tensor_transforms             import Pad, DownscaleLocalMean, RandomPatch, RandomRotate, RandomShift
 
 torch.autograd.set_detect_anomaly(False)    # [WARNING] Making it True may throw errors when using bfloat16
                                             # Reference: https://discuss.pytorch.org/t/convolutionbackward0-returned-nan-values-in-its-0th-output/175571/4
@@ -64,12 +61,17 @@ epoch_unstable_end  = chkpt_config.get("epoch_unstable_end")
 dataset_config    = config.get("dataset")
 path_train_csv    = dataset_config.get("path_train")
 path_validate_csv = dataset_config.get("path_validate")
-## cxi_key           = dataset_config.get("cxi_key")
-## size_sample       = dataset_config.get("sample_size")
-## frac_train        = dataset_config.get("frac_train")
-## frac_validate     = dataset_config.get("frac_validate")
 size_batch        = dataset_config.get("batch_size")
 num_workers       = dataset_config.get("num_workers")
+transforms_config = dataset_config.get("transforms")
+num_patch         = transforms_config.get("num_patch")
+size_patch        = transforms_config.get("size_patch")
+frac_shift_max    = transforms_config.get("frac_shift_max")
+angle_max         = transforms_config.get("angle_max")
+var_size_patch    = transforms_config.get("var_size_patch")
+downscale_factors = transforms_config.get("downscale_factors")
+H_pad             = transforms_config.get("H_pad")
+W_pad             = transforms_config.get("W_pad")
 
 # ...Model
 model_params              = config.get("model")
@@ -120,6 +122,7 @@ uses_mixed_precision = misc_config.get("uses_mixed_precision")
 max_epochs           = misc_config.get("max_epochs")
 num_gpus             = misc_config.get("num_gpus")
 compiles_model       = misc_config.get("compiles_model")
+cache_clear_after_n_batch = 5
 
 
 # [[[ ERROR HANDLING ]]]
@@ -176,42 +179,40 @@ if ddp_rank == 0:
 # Set global seed...
 set_seed(world_seed)
 
-# Set up transformation rules
-num_patch        = 250
-size_patch       = 20
-frac_shift_max   = 0.1
-angle_max        = 360
-H_input, W_input = 1024, 1024
-
+# Set up transformation...
 trans_list = (
-    PadResize(H_input, W_input),
-    RandomRotate(angle_max = angle_max, order = 0),
-    RandomShift (frac_shift_max, frac_shift_max),
-    RandomPatch (num_patch = num_patch, size_patch_y = size_patch, size_patch_x = size_patch, var_patch_y = 0.2, var_patch_x = 0.2),
+    Pad(H_pad, W_pad),
+    DownscaleLocalMean(factors = downscale_factors),
+    RandomPatch(num_patch = num_patch, H_patch = size_patch, W_patch = size_patch, var_H_patch = var_size_patch, var_W_patch = var_size_patch, returns_mask = False),
+    RandomRotate(angle_max),
+    RandomShift(frac_y_shift_max=frac_shift_max, frac_x_shift_max=frac_shift_max),
 )
 
 # Load raw data...
 set_seed(base_seed)    # ...Make sure data split is consistent across devices
-dataset_train    = PeakNetDatasetLoader(path_csv = path_train_csv   , trans_list = trans_list)
-dataset_validate = PeakNetDatasetLoader(path_csv = path_validate_csv, trans_list = trans_list)
+cache_size       = 10
+dataset_train    = PeakNetDataset(path_csv = path_train_csv   , trans_list = trans_list, cache_size = cache_size, perfs_runtime = False)
+dataset_validate = PeakNetDataset(path_csv = path_validate_csv, trans_list = trans_list, cache_size = cache_size, perfs_runtime = False)
 
 # Define the training set
 sampler_train    = torch.utils.data.DistributedSampler(dataset_train) if uses_ddp else None
 dataloader_train = torch.utils.data.DataLoader( dataset_train,
-                                                sampler     = sampler_train,
-                                                shuffle     = False,
-                                                pin_memory  = True,
-                                                batch_size  = size_batch,
-                                                num_workers = num_workers, )
+                                                sampler         = sampler_train,
+                                                shuffle         = False,
+                                                pin_memory      = True,
+                                                batch_size      = size_batch,
+                                                num_workers     = num_workers,
+                                                prefetch_factor = 2)
 
 # Define validation set...
 sampler_validate    = torch.utils.data.DistributedSampler(dataset_validate, shuffle=False) if uses_ddp else None
 dataloader_validate = torch.utils.data.DataLoader( dataset_validate,
-                                                   sampler     = sampler_validate,
-                                                   shuffle     = False,
-                                                   pin_memory  = True,
-                                                   batch_size  = size_batch,
-                                                   num_workers = num_workers, )
+                                                   sampler         = sampler_validate,
+                                                   shuffle         = False,
+                                                   pin_memory      = True,
+                                                   batch_size      = size_batch,
+                                                   num_workers     = num_workers,
+                                                   prefetch_factor = 2)
 
 
 # [[[ MODEL ]]]
@@ -236,6 +237,7 @@ peaknet_config = PeakNetConfig(
 )
 model = PeakNet(config = peaknet_config)
 model.to(device)
+
 if ddp_rank == 0:
     print(f"{sum(p.numel() for p in model.parameters())/1e6} M pamameters.")
 
@@ -254,7 +256,7 @@ if freezes_backbone:
     for param in model.backbone.parameters():
         param.requires_grad = False
 
-model.float()
+## model.to(dtype = torch.bfloat16)
 
 
 # [[[ CRITERION ]]]
@@ -307,7 +309,9 @@ if uses_ddp:
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
     # Wrap it up using DDP...
-    model = DDP(model, device_ids = [ddp_local_rank], find_unused_parameters=True)
+    model = DDP(model, device_ids = [ddp_local_rank], find_unused_parameters=False)
+
+    torch.distributed.barrier()
 
 if ddp_rank == 0:
     print(f"Current timestamp: {timestamp}")
@@ -329,44 +333,37 @@ try:
         train_loss   = torch.zeros(len(batch_train)).to(device).float()
         train_sample = torch.zeros(len(batch_train)).to(device).float()
         for batch_idx, batch_entry in batch_train:
-            # Unpack the batch entry and move them to device...
-            batch_input, batch_target = batch_entry
-            batch_input  = batch_input.to(device, dtype = torch.float)
-            batch_target = batch_target.to(device, dtype = torch.float)
+            with Timer(tag = "Moving data to gpu", is_on = False):
+                # Unpack the batch entry and move them to device...
+                batch_input, batch_target = batch_entry
+                batch_input  = batch_input.to(device, non_blocking=True)
+                batch_target = batch_target.to(device, non_blocking=True)
 
             # Forward, backward and update...
             if uses_mixed_precision:
-                with torch.cuda.amp.autocast(dtype = torch.float16):
-                    # Forward pass...
-                    batch_output = model(batch_input)
+                with Timer(tag = "Forward", is_on = False):
+                    with torch.cuda.amp.autocast(dtype = torch.bfloat16):
+                        # Forward pass...
+                        batch_output = model(batch_input)
 
-                    ## # Crop the target mask as u-net might change the output dimension...
-                    ## size_y, size_x = batch_output.shape[-2:]
-                    ## batch_target_crop = center_crop(batch_target, size_y, size_x)
+                        # Calculate the loss...
+                        loss = criterion(batch_output, batch_target)
+                        loss = loss.mean()
 
-                    # Calculate the loss...
-                    ## loss = criterion(batch_output, batch_target_crop)
-                    loss = criterion(batch_output, batch_target)
-                    loss = loss.mean()
-
-                # Backward pass and optimization...
-                optimizer.zero_grad()
-                scaler.scale(loss).backward()
-                if grad_clip != 0.0:
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                scaler.step(optimizer)
-                scaler.update()
+                with Timer(tag = "Backward", is_on = False):
+                    # Backward pass and optimization...
+                    optimizer.zero_grad()
+                    scaler.scale(loss).backward()
+                    if grad_clip != 0.0:
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                    scaler.step(optimizer)
+                    scaler.update()
             else:
                 # Forward pass...
                 batch_output = model(batch_input)
 
-                ## # Crop the target mask even if the output dimension size is changed...
-                ## size_y, size_x = batch_output.shape[-2:]
-                ## batch_target_crop = center_crop(batch_target, size_y, size_x)
-
                 # Calculate the loss...
-                ## loss = criterion(batch_output, batch_target_crop)
                 loss = criterion(batch_output, batch_target)
                 loss = loss.mean()
 
@@ -410,34 +407,24 @@ try:
         for batch_idx, batch_entry in batch_validate:
             # Unpack the batch entry and move them to device...
             batch_input, batch_target = batch_entry
-            batch_input  = batch_input.to(device, dtype = torch.float)
-            batch_target = batch_target.to(device, dtype = torch.float)
+            batch_input  = batch_input.to(device, non_blocking=True)
+            batch_target = batch_target.to(device, non_blocking=True)
 
             # Forward only...
             with torch.no_grad():
                 if uses_mixed_precision:
-                    with torch.cuda.amp.autocast(dtype = torch.float16):
+                    with torch.cuda.amp.autocast(dtype = torch.bfloat16):
                         # Forward pass...
                         batch_output = model(batch_input)
 
-                        ## # Crop the target mask as u-net might change the output dimension...
-                        ## size_y, size_x = batch_output.shape[-2:]
-                        ## batch_target_crop = center_crop(batch_target, size_y, size_x)
-
                         # Calculate the loss...
-                        ## loss = criterion(batch_output, batch_target_crop)
                         loss = criterion(batch_output, batch_target)
                         loss = loss.mean()
                 else:
                     # Forward pass...
                     batch_output = model(batch_input)
 
-                    ## # Crop the target mask as u-net might change the output dimension...
-                    ## size_y, size_x = batch_output.shape[-2:]
-                    ## batch_target_crop = center_crop(batch_target, size_y, size_x)
-
                     # Calculate the loss...
-                    ## loss = criterion(batch_output, batch_target_crop)
                     loss = criterion(batch_output, batch_target)
                     loss = loss.mean()
 

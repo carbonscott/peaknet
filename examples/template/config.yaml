@@ -1,53 +1,79 @@
-CHKPT:
-  CHKPT_SAVING_PERIOD: 5
-  DIRECTORY          : experiments/chkpts
-  EPOCH_UNSTABLE_END : 40
-  FILENAME_PREFIX    : {{ filename_prefix }}
-  PATH_CHKPT_PREV    : null
-  PRETRAIN           : {{ path_pretrain_chkpt|default('pretrained_chkpts/transfered_weights.resnet50.chkpt') }}
-DATASET:
-  BATCH_SIZE   : 5
-  FRAC_TRAIN   : 0.8
-  FRAC_VALIDATE: 1.0
-  NUM_WORKERS  : {{ num_workers }}
-  PATH         : {{ path_dataset }}
-  SAMPLE_SIZE  : {{ sample_size }}
-  CXI_KEY:
-    num_peaks : "/entry_1/result_1/nPeaks"
-    peak_y    : "/entry_1/result_1/peakYPosRaw"
-    peak_x    : "/entry_1/result_1/peakXPosRaw"
-    data      : "/entry_1/data_1/data"
-    mask      : "/entry_1/data_1/mask"
-    segmask   : "/entry_1/data_1/segmask"
-DDP:
-  BACKEND               : nccl
-  USES_UNIQUE_WORLD_SEED: true
-LOGGING:
-  DIRECTORY      : experiments/logs
-  FILENAME_PREFIX: {{ filename_prefix }}
-LOSS:
-  FOCAL:
-    ALPHA: 1.0
-    GAMMA: 2.0
-LR_SCHEDULER:
-  LR           : 3e-4
-  MIN_LR       : 1e-7
-  TOTAL_EPOCHS : 500
-  USES_PREV    : true
-  WARMUP_EPOCHS: 5
-MISC:
-  MAX_EPOCHS          : 400
-  NUM_GPUS            : {{ num_gpus }}
-  NUM_NODES           : {{ num_nodes }}
-  USES_MIXED_PRECISION: true
-MODEL:
-  BIFPN:
-    NUM_BLOCKS  : 3
-    NUM_FEATURES: 64
-    NUM_LEVELS  : 3
-  FREEZES_BACKBONE   : false
-  USES_RANDOM_WEIGHTS: false
-OPTIM:
-  GRAD_CLIP   : 1.0
-  LR          : 0.0003
-  WEIGHT_DECAY: 1e-4
+checkpoint:
+  chkpt_saving_period: 5
+  directory          : experiments/chkpts
+  epoch_unstable_end : 10
+  filename_prefix    : {{ filename_prefix }}
+  path_chkpt_prev    : null
+  pretrain           : {{ path_pretrain_chkpt|default(null) }}
+dataset:
+  batch_size   : {{ batch_size }}
+  num_workers  : {{ num_workers }}
+  path_train   : experiments/datasets/{{ path_train }}
+  path_validate: experiments/datasets/{{ path_validate }}
+  transforms:
+    H_pad: 2048
+    W_pad: 2048
+    num_patch: 100
+    size_patch: 20
+    angle_max: 360
+    frac_shift_max: 0.1
+    downscale_factors: [2, 2]
+    var_size_patch: 0.2
+ddp:
+  backend               : nccl
+  uses_unique_world_seed: true
+logging:
+  directory      : experiments/logs
+  filename_prefix: {{ filename_prefix }}
+loss:
+  focal:
+    alpha: 1.0
+    gamma: 2.0
+lr_scheduler:
+  min_lr       : !!float 1e-7
+  total_epochs : 100
+  uses_prev    : true
+  warmup_epochs: 5
+misc:
+  max_epochs          : 200
+  num_gpus            : {{ num_gpus }}
+  num_nodes           : {{ num_nodes }}
+  uses_mixed_precision: true
+  compiles_model      : true
+model:
+  backbone:
+    in_channels    : 1
+    model_name     : {{ model_name }}
+    uses_pretrained: True
+  bifpn:
+    num_blocks: 1
+    block:
+      relu_inplace     : False
+      down_scale_factor: 0.5
+      up_scale_factor  : 2
+      num_features     : 256
+      num_levels       : 4
+      base_level       : 4    # ...ResNet50 uses 2, EfficientNet uses 3
+      bn:
+        eps     : !!float 1e-5
+        momentum: !!float 1e-1
+      fusion:
+        eps: !!float 1e-5
+  freezes_backbone   : false
+  uses_random_weights: false
+  seg_head:
+    up_scale_factor:
+      - 4  # stage0
+      - 8  # stage1
+      - 16 # stage2
+      - 32 # stage3
+    num_groups           : 32
+    out_channels         : 256
+    num_classes          : 2
+    base_scale_factor    : 2
+    uses_learned_upsample: False
+    num_classes          : 2
+optim:
+  grad_clip   : 1.0
+  lr          : !!float 2e-4
+  weight_decay: !!float 1e-4
