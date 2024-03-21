@@ -73,6 +73,9 @@ class PeakNetDataset(Dataset):
             img   = data[0]    # (1, C, H, W)
             label = data[1]    # (1, C, H, W)
 
+        # Binary the label...
+        label = label > 0
+
         return img, label
 
 
