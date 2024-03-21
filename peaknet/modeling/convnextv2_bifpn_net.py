@@ -48,10 +48,10 @@ class SegLateralLayer(nn.Module):
 
             # Optional upsampling...
             if self.enables_upsample:
-                x = F.interpolate(x,
+                x = F.interpolate(x.to(torch.float32),
                                   scale_factor  = self.base_scale_factor,
                                   mode          = 'bilinear',
-                                  align_corners = False)
+                                  align_corners = False).to(torch.bfloat16)
 
         return x
 
@@ -207,11 +207,11 @@ class PeakNet(nn.Module):
         pred_map = self.head_segmask(fmap_acc)
 
         # Upscale...
-        pred_map = F.interpolate(pred_map,
+        pred_map = F.interpolate(pred_map.to(torch.float32),
                                  scale_factor  = self.max_scale_factor,
                                  mode          = 'bilinear',
-                                 align_corners = False)                   \
-                   if not self.config.seg_head.uses_learned_upsample else \
+                                 align_corners = False).to(torch.bfloat16) \
+                   if not self.config.seg_head.uses_learned_upsample else  \
                    self.head_upsample_layer(pred_map)
 
         return pred_map

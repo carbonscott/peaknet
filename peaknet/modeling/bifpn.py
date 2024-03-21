@@ -159,10 +159,10 @@ class BiFPNBlock(nn.Module):
             p_high  = p[level_high]
 
             w1, w2 = self.w_m[idx]
-            m_low_up = F.interpolate(m_low,
+            m_low_up = F.interpolate(m_low.to(torch.float32),
                                      scale_factor  = self.config.up_scale_factor,
                                      mode          = 'bilinear',
-                                     align_corners = False)
+                                     align_corners = False).to(torch.bfloat16)
             m_fused  = w1 * p_high + w2 * m_low_up
             m_fused /= (w1 + w2 + self.config.fusion.eps)
             m_fused  = self.conv[f"m{level_high}"](m_fused)
@@ -179,10 +179,10 @@ class BiFPNBlock(nn.Module):
             p_low  = p[level_low ]
 
             w1, w2, w3 = self.w_q[idx]
-            q_high_up = F.interpolate(q_high,
+            q_high_up = F.interpolate(q_high.to(torch.float32),
                                       scale_factor  = self.config.down_scale_factor,
                                       mode          = 'bilinear',
-                                      align_corners = False)
+                                      align_corners = False).to(torch.bfloat16)
             q_fused  = w1 * p_low + w2 * m_low + w3 * q_high_up
             q_fused /= (w1 + w2 + w3 + self.config.fusion.eps)
             q_fused  = self.conv[f"q{level_low}"](q_fused)
@@ -288,40 +288,40 @@ class BiFPNBlockEDU(nn.Module):
         # ___/ Stage M \___
         # Fuse M6 = P7 + P6
         w1, w2 = self.w_m[0]
-        p7_up = F.interpolate(p7,
+        p7_up = F.interpolate(p7.to(torch.float32),
                               scale_factor  = CONFIG.BIFPN.UP_SCALE_FACTOR,
                               mode          = 'bilinear',
-                              align_corners = False)
+                              align_corners = False).to(torch.bfloat16)
         m6  = w1 * p6 + w2 * p7_up
         m6 /= (w1 + w2 + CONFIG.BIFPN.FUSION.EPS)
         m6  = self.conv.m6(m6)
 
         # Fuse M5 = M6 + P5
         w1, w2 = self.w_m[1]
-        m6_up = F.interpolate(m6,
+        m6_up = F.interpolate(m6.to(torch.float32),
                               scale_factor  = CONFIG.BIFPN.UP_SCALE_FACTOR,
                               mode          = 'bilinear',
-                              align_corners = False)
+                              align_corners = False).to(torch.bfloat16)
         m5  = w1 * p5 + w2 * m6_up
         m5 /= (w1 + w2 + CONFIG.BIFPN.FUSION.EPS)
         m5  = self.conv.m5(m5)
 
         # Fuse M4 = M5 + P4
         w1, w2 = self.w_m[2]
-        m5_up = F.interpolate(m5,
+        m5_up = F.interpolate(m5.to(torch.float32),
                               scale_factor  = CONFIG.BIFPN.UP_SCALE_FACTOR,
                               mode          = 'bilinear',
-                              align_corners = False)
+                              align_corners = False).to(torch.bfloat16)
         m4  = w1 * p4 + w2 * m5_up
         m4 /= (w1 + w2 + CONFIG.BIFPN.FUSION.EPS)
         m4  = self.conv.m4(m4)
 
         # Fuse M3 = M4 + P3
         w1, w2 = self.w_m[3]
-        m4_up = F.interpolate(m4,
+        m4_up = F.interpolate(m4.to(torch.float32),
                               scale_factor  = CONFIG.BIFPN.UP_SCALE_FACTOR,
                               mode          = 'bilinear',
-                              align_corners = False)
+                              align_corners = False).to(torch.bfloat16)
         m3  = w1 * p3 + w2 * m4_up
         m3 /= (w1 + w2 + CONFIG.BIFPN.FUSION.EPS)
         m3  = self.conv.m3(m3)
@@ -330,40 +330,40 @@ class BiFPNBlockEDU(nn.Module):
         # Fuse Q4 = Q3 + M4 + P4
         w1, w2, w3 = self.w_q[0]
         q3 = m3
-        q3_up = F.interpolate(q3,
+        q3_up = F.interpolate(q3.to(torch.float32),
                               scale_factor  = CONFIG.BIFPN.DOWN_SCALE_FACTOR,
                               mode          = 'bilinear',
-                              align_corners = False)
+                              align_corners = False).to(torch.bfloat16)
         q4  = w1 * p4 + w2 * m4 + w3 * q3_up
         q4 /= (w1 + w2 + w3 + CONFIG.BIFPN.FUSION.EPS)
         q4  = self.conv.q4(q4)
 
         # Fuse Q5 = Q4 + M5 + P5
         w1, w2, w3 = self.w_q[1]
-        q4_up = F.interpolate(q4,
+        q4_up = F.interpolate(q4.to(torch.float32),
                               scale_factor  = CONFIG.BIFPN.DOWN_SCALE_FACTOR,
                               mode          = 'bilinear',
-                              align_corners = False)
+                              align_corners = False).to(torch.bfloat16)
         q5 = w1 * p5 + w2 * m5 + w3 * q4_up
         q5 /= (w1 + w2 + w3 + CONFIG.BIFPN.FUSION.EPS)
         q5  = self.conv.q5(q5)
 
         # Fuse Q6 = Q5 + M6 + P6
         w1, w2, w3 = self.w_q[2]
-        q5_up = F.interpolate(q5,
+        q5_up = F.interpolate(q5.to(torch.float32),
                               scale_factor  = CONFIG.BIFPN.DOWN_SCALE_FACTOR,
                               mode          = 'bilinear',
-                              align_corners = False)
+                              align_corners = False).to(torch.bfloat16)
         q6 = w1 * p6 + w2 * m6 + w3 * q5_up
         q6 /= (w1 + w2 + w3 + CONFIG.BIFPN.FUSION.EPS)
         q6  = self.conv.q6(q6)
 
         # Fuse Q7 = Q6 + P7
         w1, w2, w3 = self.w_q[3]
-        q6_up = F.interpolate(q6,
+        q6_up = F.interpolate(q6.to(torch.float32),
                               scale_factor  = CONFIG.BIFPN.DOWN_SCALE_FACTOR,
                               mode          = 'bilinear',
-                              align_corners = False)
+                              align_corners = False).to(torch.bfloat16)
         q7 = w1 * p7 + w2 * p7 + w3 * q6_up
         q7 /= (w1 + w2 + w3 + CONFIG.BIFPN.FUSION.EPS)
         q7  = self.conv.q7(q7)
