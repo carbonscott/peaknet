@@ -54,9 +54,10 @@ with open(fl_yaml, 'r') as fh:
 
 # ...Checkpoint
 chkpt_config        = config.get("checkpoint")
-drc_chkpt           = chkpt_config.get("directory")
+dir_root_chkpt      = chkpt_config.get("directory")
 path_pretrain_chkpt = chkpt_config.get("pretrain")
 fl_chkpt_prefix     = chkpt_config.get("filename_prefix")
+dir_chkpt_prefix    = chkpt_config.get("dir_chkpt_prefix")
 path_chkpt_prev     = chkpt_config.get("path_chkpt_prev")
 chkpt_saving_period = chkpt_config.get("chkpt_saving_period")
 epoch_unstable_end  = chkpt_config.get("epoch_unstable_end")
@@ -476,9 +477,16 @@ try:
             loss_min = world_validate_loss_mean
 
             if (epoch % chkpt_saving_period == 0) or (epoch > epoch_unstable_end):
-                fl_chkpt = f"{timestamp}.epoch_{epoch}.rank_{fsdp_rank}.chkpt"
-                if fl_chkpt_prefix is not None: fl_chkpt = f"{fl_chkpt_prefix}.{fl_chkpt}"
-                path_chkpt = os.path.join(drc_chkpt, fl_chkpt)
+                dir_chkpt_timestamp = f"{timestamp}"
+                if dir_chkpt_prefix is not None: dir_chkpt_timestamp = f"{dir_chkpt_prefix}.{dir_chkpt_timestamp}"
+                os.makedirs(dir_chkpt_timestamp, exist_ok = True)
+
+                dir_chkpt_epoch = f"epoch_{epoch}"
+                dir_chkpt = os.path.join(dir_chkpt_timestamp, dir_chkpt_epoch)
+                os.makedirs(dir_chkpt_epoch, exist_ok = True)
+
+                fl_chkpt = f"rank_{fsdp_rank}.chkpt"
+                path_chkpt = os.path.join(dir_root_chkpt, dir_chkpt, fl_chkpt)
                 save_checkpoint(model,
                                 optimizer,
                                 scheduler,
