@@ -42,7 +42,7 @@ parser.add_argument("yaml_file", help="Path to the YAML file")
 args = parser.parse_args()
 
 
-# [[[ HYPER-PARAMERTERS ]]]
+# [[[ CONFIG ]]]
 # Load CONFIG from YAML
 fl_yaml = args.yaml_file
 with open(fl_yaml, 'r') as fh:
@@ -153,17 +153,13 @@ else:
     ddp_world_size = 1
     print(f"NO DDP is used.  RANK:{ddp_rank},LOCAL_RANK:{ddp_local_rank},WORLD_SIZE:{ddp_world_size}")
 
-# Set up GPU device
+
+# [[[ DEVICE ]]]
 device = f'cuda:{ddp_local_rank}' if torch.cuda.is_available() else 'cpu'
 if device != 'cpu': torch.cuda.set_device(device)
-seed_offset = ddp_rank if uses_unique_world_seed else 0
 
 
-# [[[ USE YAML CONFIG TO INITIALIZE HYPERPARAMETERS ]]]
-# Set Seed
-base_seed   = 0
-world_seed  = base_seed + seed_offset
-
+# [[[ LOGGER ]]]
 if ddp_rank == 0:
     # Fetch the current timestamp...
     timestamp = init_logger(fl_prefix = fl_log_prefix, drc_log = drc_log, returns_timestamp = True)
@@ -176,7 +172,11 @@ if ddp_rank == 0:
 
 
 # [[[ DATASET ]]]
-# Set global seed...
+# Set Seed...
+base_seed   = 0
+seed_offset = ddp_rank if uses_unique_world_seed else 0
+world_seed  = base_seed + seed_offset
+
 set_seed(world_seed)
 
 # Set up transformation...
@@ -281,7 +281,7 @@ scheduler = CosineLRScheduler(optimizer     = optimizer,
 ##                                          verbose        = True)
 
 
-# [[[ TRAIN LOOP ]]]
+# [[[ CHECKPOINT ]]]
 # From a prev training???
 epoch_min = 0
 loss_min  = float('inf')
@@ -295,6 +295,7 @@ if path_chkpt_prev is not None:
     epoch_min += 1    # Next epoch
     logger.info(f"PREV - epoch_min = {epoch_min}, loss_min = {loss_min}")
 
+# [[[ TRAINING POLICY ]]]
 # Uses mixed precision???
 if uses_mixed_precision: scaler = torch.cuda.amp.GradScaler()
 
@@ -313,9 +314,9 @@ if uses_ddp:
 
     torch.distributed.barrier()
 
+# [[[ TRAINING LOOP ]]]
 if ddp_rank == 0:
     print(f"Current timestamp: {timestamp}")
-
 try:
     for epoch in tqdm.tqdm(range(max_epochs)):
         epoch += epoch_min
@@ -324,7 +325,7 @@ try:
             # Shuffle the training examples...
             sampler_train.set_epoch(epoch)
 
-        # ___/ TRAIN \___
+        # [[[ TRAIN PROCEDURE ]]]
         # Turn on training related components in the model...
         model.train()
 
@@ -397,7 +398,7 @@ try:
             logger.info(f"MSG (device:{device}) - epoch {epoch}, mean train loss = {world_train_loss_mean:.8f}")
 
 
-        # ___/ VALIDATE \___
+        # [[[ VALIDATION PROCEDURE ]]]
         model.eval()
 
         # Fetch batches...
@@ -458,7 +459,7 @@ try:
         scheduler.step()
 
 
-        # ___/ SAVE CHECKPOINT??? \___
+        # [[[ SAVE CHECKPOINT ]]]
         if ddp_rank == 0:
             if world_validate_loss_mean < loss_min:
                 loss_min = world_validate_loss_mean
