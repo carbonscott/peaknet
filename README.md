@@ -13,6 +13,9 @@ Add a shortcut to the shared demo data in your own Google Drive:
     ![](figures/choose_mydrive.png)
 
 - Open the Colab link: [https://colab.research.google.com/drive/113uoe5Dwg_8gnNy5NWwWjKCa91qKd-25?usp=sharing](https://colab.research.google.com/drive/113uoe5Dwg_8gnNy5NWwWjKCa91qKd-25?usp=sharing)
+  - Google Colab now only permits mounting a drive from the account where your
+    notebook is located.  To access data, save a copy of this notebook to the
+    Google Drive containing your data.
 
 - Follow the instructions in the Colab notebook to run the demo.
 
@@ -75,7 +78,8 @@ installtation guide below.
   than one minute to install).
 
     ```
-    pip install git+https://github.com/carbonscott/peaknet --upgrade
+    # Run this before trying the demo.
+    pip install git+https://github.com/carbonscott/peaknet@feec7e7b94ffcd5d981c140a13af26ea5c70d2b7
     ```
 
 
