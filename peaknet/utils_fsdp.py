@@ -370,7 +370,7 @@ class FullStateDictCheckpoint:
         """
         rank      = self.config.rank
         optimizer = self.config.optimizer
-        model     = self.model
+        model     = self.config.model
 
         optim_full_state_dict = None
         if rank == 0:
