@@ -247,7 +247,7 @@ class TrainingStateDictConfig:
 
 @dataclass
 class FullStateDictCheckpointConfig:
-    model          : Optional[nn.Module]    # A FSDP wrapped model
+    model          : Optional[nn.Module]    # A FSDP wrapped model on all ranks
     optimizer      : Optional[torch.optim.Optimizer]
     lr_scheduler   : Optional[torch.optim.lr_scheduler._LRScheduler]
     training_state : TrainingStateDictConfig
@@ -262,7 +262,7 @@ class FullStateDictCheckpoint:
 
 
     def prepare_model_full_state_dict(self):
-        model = self.config.model
+        model = self.config.model    # A FSDP wrapped model on all ranks
 
         state_dict = None
 
