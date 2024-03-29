@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import torch.cuda.nccl as nccl
 import torch.distributed as dist
 
+import pickle
+
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     FullStateDictConfig,
@@ -207,7 +209,8 @@ def broadcast_dict(obj, src=0, device = 'cpu'):
     if rank == src:
         # Serialize the dictionary...
         buffer = pickle.dumps(obj)
-        tensor = torch.ByteTensor(list(buffer), device = device)
+        ## tensor = torch.ByteTensor(list(buffer), device = device)
+        tensor = torch.tensor(list(buffer), dtype=torch.uint8, device=device)
 
         # Communicate about the size of the underlying data...
         tensor_size = torch.tensor([len(buffer)], dtype=torch.long, device = device)
@@ -231,6 +234,11 @@ def broadcast_dict(obj, src=0, device = 'cpu'):
         obj = pickle.loads(buffer)
 
     return obj
+
+
+#####################
+# Safety check
+#####################
 
 
 #####################
@@ -261,8 +269,19 @@ class FullStateDictCheckpoint:
         self.full_state_dict = None
 
 
+    @staticmethod
+    def contains_fsdp(module):
+        return hasattr(module, 'module')
+
+
     def prepare_model_full_state_dict(self):
         model = self.config.model    # A FSDP wrapped model on all ranks
+
+        # Sanity check if the model is wrapped with FSDP
+        if not FullStateDictCheckpoint.contains_fsdp(model):
+            raise ValueError(f"RANK {self.config.rank} - The model subject to "  \
+            "checkpointing must be wrapped with an FSDP wrapper before saving a "\
+            "full state dict.")
 
         state_dict = None
 
@@ -284,9 +303,15 @@ class FullStateDictCheckpoint:
 
 
     def prepare_optim_full_state_dict(self):
-        print(f"Preparing optim full state dict...")
         model     = self.config.model
         optimizer = self.config.optimizer
+
+        # Sanity check if the model is wrapped with FSDP
+        if not FullStateDictCheckpoint.contains_fsdp(model):
+            raise ValueError(f"RANK {self.config.rank} - The model subject to "  \
+            "checkpointing must be wrapped with an FSDP wrapper before saving a "\
+            "full state dict.")
+        print(f"[rank {self.config.rank}] FSDP detected...")
 
         state_dict = None
         if optimizer is not None:
@@ -317,7 +342,7 @@ class FullStateDictCheckpoint:
 
 
     def save_full_state_dict(self):
-        dist.barrier()
+        dist.barrier()    # Make sure all shards are at the same timepoint in training.
 
         rank = self.config.rank
 
@@ -346,6 +371,12 @@ class FullStateDictCheckpoint:
         rank            = self.config.rank
         path_checkpoint = self.config.path_checkpoint
         model           = self.config.model
+
+        # Sanity check if the model is wrapped with FSDP
+        if FullStateDictCheckpoint.contains_fsdp(model):
+            raise ValueError(f"RANK {self.config.rank} - The model subject to "  \
+            "checkpointing with full state dict must be resumed before the FSDP "\
+            "wrapper.")
 
         if rank == 0:
             if self.full_state_dict is None:
@@ -386,4 +417,4 @@ class FullStateDictCheckpoint:
         # Scatter the training state to all ranks...
         training_state = broadcast_dict(training_state, src = 0, device = device)
 
-        self.config.training_state = training_state
+        self.config.training_state = TrainingStateDictConfig(**training_state)
