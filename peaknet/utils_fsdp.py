@@ -198,6 +198,41 @@ verify_bfloat_support = (
     and nccl.version() >= (2, 10)
 )
 
+
+#####################
+# Add dict broadcast
+#####################
+def broadcast_dict(obj, src=0, device = 'cpu'):
+    rank = dist.get_rank()
+    if rank == src:
+        # Serialize the dictionary...
+        buffer = pickle.dumps(obj)
+        tensor = torch.ByteTensor(list(buffer), device = device)
+
+        # Communicate about the size of the underlying data...
+        tensor_size = torch.tensor([len(buffer)], dtype=torch.long, device = device)
+    else:
+        # Prepare to receive the size of the underlying data...
+        tensor_size = torch.tensor([0], dtype=torch.long, device = device)
+
+    # Broadcast the size of the tensor to all processes...
+    dist.broadcast(tensor_size, src)
+
+    # Prepare to receive data...
+    if rank != src:
+        tensor = torch.empty((tensor_size.item(),), dtype=torch.uint8, device = device)
+
+    # Broadcast the data...
+    dist.broadcast(tensor, src)
+
+    if rank != src:
+        # Deserialize the tensor back into a dictionary...
+        buffer = tensor.cpu().numpy().tobytes()
+        obj = pickle.loads(buffer)
+
+    return obj
+
+
 #####################
 # checkpoint
 #####################
@@ -205,7 +240,7 @@ verify_bfloat_support = (
 
 @dataclass
 class TrainingStateDictConfig:
-    epoch              : int
+    current_epoch      : int
     current_mini_batch : int
     current_micro_batch: int
     loss_min           : float
@@ -217,11 +252,13 @@ class FullStateDictCheckpointConfig:
     lr_scheduler   : Optional[torch.optim.lr_scheduler._LRScheduler]
     training_state : TrainingStateDictConfig
     rank           : int
-    path_checkpoint: str
+    device         : str
+    path_checkpoint: Optional[str]
 
 class FullStateDictCheckpoint:
     def __init__(self, config):
         self.config = config
+        self.full_state_dict = None
 
 
     def prepare_model_full_state_dict(self):
@@ -247,11 +284,13 @@ class FullStateDictCheckpoint:
 
 
     def prepare_optim_full_state_dict(self):
+        print(f"Preparing optim full state dict...")
         model     = self.config.model
         optimizer = self.config.optimizer
 
         state_dict = None
-        state_dict = FSDP.full_optim_state_dict(model, optimizer)
+        if optimizer is not None:
+            state_dict = FSDP.full_optim_state_dict(model, optimizer)
 
         return state_dict
 
@@ -272,8 +311,9 @@ class FullStateDictCheckpoint:
         training_state = None
         if rank == 0:
             training_state = self.config.training_state
+            training_state = asdict(training_state)
 
-        return asdict(training_state)
+        return training_state
 
 
     def save_full_state_dict(self):
@@ -297,3 +337,53 @@ class FullStateDictCheckpoint:
             torch.save(full_state_dict, path_checkpoint)
 
         dist.barrier()
+
+
+    def load_model_full_state_dict(self):
+        """
+        Must run before FSDP wrapper.
+        """
+        rank            = self.config.rank
+        path_checkpoint = self.config.path_checkpoint
+        model           = self.config.model
+
+        if rank == 0:
+            if self.full_state_dict is None:
+                self.full_state_dict = torch.load(path_checkpoint, map_location = 'cpu')
+            model_full_state_dict = self.full_state_dict.get('model_state_dict')
+            model.load_state_dict(model_full_state_dict)
+
+
+    def load_optim_full_state_dict(self):
+        """
+        Must run after FSDP wrapper.
+        """
+        rank      = self.config.rank
+        optimizer = self.config.optimizer
+        model     = self.model
+
+        optim_full_state_dict = None
+        if rank == 0:
+            if self.full_state_dict is None:
+                self.full_state_dict = torch.load(path_checkpoint, map_location = 'cpu')
+            optim_full_state_dict = self.full_state_dict.get('optimizer_state_dict')
+
+        # Scatter the optimizer state to all ranks...
+        sharded_optim_state_dict = FSDP.scatter_full_optim_state_dict(optim_full_state_dict, model)
+        optimizer.load_state_dict(sharded_optim_state_dict)
+
+
+    def load_training_state_dict(self):
+        rank           = self.config.rank
+        device         = self.config.device
+        training_state = self.config.training_state
+
+        if rank == 0:
+            if self.full_state_dict is None:
+                self.full_state_dict = torch.load(path_checkpoint, map_location = 'cpu')
+            training_state = self.full_state_dict.get('training_state_dict')
+
+        # Scatter the training state to all ranks...
+        training_state = broadcast_dict(training_state, src = 0, device = device)
+
+        self.config.training_state = training_state
