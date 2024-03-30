@@ -427,26 +427,10 @@ if path_chkpt_prev is None:
         if dir_chkpt_prefix is not None: dir_chkpt = f"{dir_chkpt_prefix}.{dir_chkpt}"
         path_chkpt = os.path.join(dir_root_chkpt, dir_chkpt)
     checkpointer.save(model, optimizer, scheduler, training_state, path_chkpt)
-dist.destroy_process_group()
 
-## # Let's save a full state dict chkpt...
-## epoch = 4
-## current_micro_batch = 10
-## current_mini_batch = 10
-## loss_min = 0.2
-## checkpointer.config.training_state.current_epoch       = epoch
-## checkpointer.config.training_state.current_micro_batch = current_micro_batch
-## checkpointer.config.training_state.current_mini_batch  = current_mini_batch
-## checkpointer.config.training_state.loss_min            = loss_min
-## checkpointer.config.model        = model       # Need it from every rank
-## checkpointer.config.optimizer    = optimizer   # Need it from every rank
-## checkpointer.config.lr_scheduler = scheduler   # Need it from every rank
-## if fsdp_rank == 0:
-##     fl_chkpt = f"{timestamp}.epoch_{epoch}.microbatch_{micro_batch}.chkpt"
-##     if fl_chkpt_prefix is not None: fl_chkpt = f"{fl_chkpt_prefix}.{fl_chkpt}"
-##     path_chkpt = os.path.join(dir_root_chkpt, fl_chkpt)
-##     checkpointer.config.path_checkpoint = path_chkpt
-## checkpointer.save_full_state_dict()
+dist.barrier()
+if dist.is_initialized():
+    dist.destroy_process_group()
 
 ## # [[[ TRAIN LOOP ]]]
 ## try:
