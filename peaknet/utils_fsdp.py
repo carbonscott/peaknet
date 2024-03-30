@@ -16,7 +16,6 @@ from torch.distributed.fsdp import (
     FullStateDictConfig,
     StateDictType,
 )
-import pickle
 
 # -- Imports for saving sharded state dict
 from torch.distributed._shard.checkpoint import (
@@ -37,6 +36,10 @@ from pkg_resources import packaging
 # -- Imports for dataclasses
 from dataclasses import dataclass, asdict
 from typing import Optional
+
+# -- Rest
+import pickle
+import os
 
 # ----------------------------------------------------------------------- #
 #  MEMORY TOOL
@@ -395,10 +398,12 @@ class FullStateDictCheckpoint:
 
 
     def _load_training_state_dict(self):
-        rank           = self.config.rank
-        device         = self.config.device
-        training_state = self.config.training_state
+        rank            = self.config.rank
+        device          = self.config.device
+        training_state  = self.config.training_state
+        path_checkpoint = self.config.path_checkpoint
 
+        training_state = None
         if rank == 0:
             if self.full_state_dict is None:
                 self.full_state_dict = torch.load(path_checkpoint, map_location = 'cpu')
@@ -414,7 +419,9 @@ class FullStateDictCheckpoint:
         rank         = self.config.rank
         device       = self.config.device
         lr_scheduler = self.config.lr_scheduler
+        path_checkpoint = self.config.path_checkpoint
 
+        lr_scheduler_state_dict = None
         if rank == 0:
             if self.full_state_dict is None:
                 self.full_state_dict = torch.load(path_checkpoint, map_location = 'cpu')
@@ -557,7 +564,9 @@ class ShardedStateDictCheckpoint:
         )
 
         # Create a directory for saving checkpoints
+        device = self.config.device
         path_checkpoint = self.config.path_checkpoint
+        path_checkpoint = broadcast_dict(dict(path_checkpoint=path_checkpoint), src = 0, device = device).get('path_checkpoint')
         os.makedirs(path_checkpoint, exist_ok=True)
 
         # Write the state_dict to a checkpoint directory
@@ -592,9 +601,12 @@ class ShardedStateDictCheckpoint:
                 planner        = DefaultLoadPlanner(),
             )
             model.load_state_dict(state_dict.get('model_state_dict'))
-            model.to(self.config.rank)
+            ## model.to(self.config.rank)
 
         # -- Optimizer
+        if optimizer is None:
+            raise ValueError("Optimizer has not been properly initialized")
+
         with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
             optim_state = load_sharded_optimizer_state_dict(
                 model_state_dict = model.state_dict(),
@@ -602,7 +614,7 @@ class ShardedStateDictCheckpoint:
                 storage_reader   = FileSystemReader(path_checkpoint),
             )
         flattened_optim_state_dict = FSDP.optim_state_dict_to_load(
-            model, optimizer, optim_state.get('optimizer_state_dict')
+            model = model, optim = optimizer, optim_state_dict = optim_state.get('optimizer_state_dict')
         )
         optimizer.load_state_dict(flattened_optim_state_dict)
 
@@ -628,8 +640,70 @@ class ShardedStateDictCheckpoint:
         return training_state
 
 
-    def save(self):
+    def _load_training_state_dict(self):
+        rank            = self.config.rank
+        device          = self.config.device
+        training_state  = self.config.training_state
+        path_checkpoint = self.config.path_checkpoint
+
+        training_state = None
+        if rank == 0:
+            path_scheduler_and_training_checkpoint = os.path.join(path_checkpoint, 'scheduler_and_training.chkpt')
+            full_state_dict = torch.load(path_scheduler_and_training_checkpoint, map_location = 'cpu')
+            training_state = full_state_dict.get('training_state_dict')
+
+        # Scatter the training state to all ranks...
+        training_state = broadcast_dict(training_state, src = 0, device = device)
+
+        self.config.training_state = TrainingStateDictConfig(**training_state)
+
+
+    def _load_lr_scheduler_state_dict(self):
+        rank         = self.config.rank
+        device       = self.config.device
+        lr_scheduler = self.config.lr_scheduler
+        path_checkpoint = self.config.path_checkpoint
+
+        lr_scheduler_state_dict = None
+        if rank == 0:
+            path_scheduler_and_training_checkpoint = os.path.join(path_checkpoint, 'scheduler_and_training.chkpt')
+            full_state_dict = torch.load(path_scheduler_and_training_checkpoint, map_location = 'cpu')
+            lr_scheduler_state_dict = full_state_dict.get('scheduler_state_dict')
+
+        # Scatter the training state to all ranks...
+        lr_scheduler_state_dict = broadcast_dict(lr_scheduler_state_dict, src = 0, device = device)
+
+        self.config.lr_scheduler.load_state_dict(lr_scheduler_state_dict)
+
+
+    def update_config(self, model = None, optimizer = None, lr_scheduler = None, training_state = None, path_checkpoint = None):
+        if model is not None:
+            self.config.model = model
+            print(f"RANK {self.config.rank} - Model loaded.")
+
+        if optimizer is not None:
+            self.config.optimizer = optimizer
+            print(f"RANK {self.config.rank} - Optimizer loaded.")
+
+        if lr_scheduler is not None:
+            self.config.lr_scheduler = lr_scheduler
+            print(f"RANK {self.config.rank} - Scheduler loaded.")
+
+        if training_state is not None:
+            self.config.training_state = training_state
+            print(f"RANK {self.config.rank} - Training state loaded.")
+
+        if path_checkpoint is not None:
+            self.config.path_checkpoint = path_checkpoint
+            print(f"RANK {self.config.rank} - Checkpoint path loaded.")
+
         dist.barrier()
+
+
+    def save(self, model, optimizer, lr_scheduler, training_state, path_checkpoint):
+        dist.barrier()
+
+        self.update_config(model, optimizer, lr_scheduler, training_state, path_checkpoint)
 
         # -- Model and Optimizer
         self._save_model_and_optimizer()
@@ -638,6 +712,7 @@ class ShardedStateDictCheckpoint:
         lr_scheduler_state_dict = self._prepare_lr_scheduler_state_dict_by_rank0()
         training_state_dict     = self._prepare_training_state_dict_by_rank0()
 
+        rank = self.config.rank
         if rank == 0:
             path_checkpoint = self.config.path_checkpoint
             path_scheduler_and_training_checkpoint = os.path.join(path_checkpoint, 'scheduler_and_training.chkpt')
@@ -655,5 +730,7 @@ class ShardedStateDictCheckpoint:
         self._load_model_and_optimizer()
 
         # -- Scheduler and training state (rank0 only)
+        self._load_training_state_dict()
+        self._load_lr_scheduler_state_dict()
 
         dist.barrier()
