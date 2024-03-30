@@ -9,6 +9,7 @@ import torch.distributed as dist
 import colorama
 colorama.init(autoreset=True)
 
+# -- Imports for FSDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 # -- Imports for saving full state dict
@@ -18,17 +19,34 @@ from torch.distributed.fsdp import (
 )
 
 # -- Imports for saving sharded state dict
-from torch.distributed._shard.checkpoint import (
-    FileSystemReader,
-    FileSystemWriter,
-    load_state_dict,
-    save_state_dict,
-)
-from torch.distributed.checkpoint.default_planner import (
-    DefaultLoadPlanner,
-    DefaultSavePlanner,
-)
-from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
+try:
+    # Use new API
+    from torch.distributed.checkpoint import (
+        FileSystemReader,
+        FileSystemWriter,
+        load,
+        save,
+        DefaultLoadPlanner,
+        DefaultSavePlanner,
+        load_sharded_optimizer_state_dict,
+    )
+except ImportError:
+    # Fall back to the old API
+    from torch.distributed._shard.checkpoint import (
+        FileSystemReader,
+        FileSystemWriter,
+        load_state_dict,
+        save_state_dict,
+    )
+    from torch.distributed.checkpoint.default_planner import (
+        DefaultLoadPlanner,
+        DefaultSavePlanner,
+    )
+    from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
+
+    import warnings
+    warnings.warn("Using older version of the FSDP checkpoint API.", DeprecationWarning)
+
 
 # -- Imports for understanding package versions
 from pkg_resources import packaging
