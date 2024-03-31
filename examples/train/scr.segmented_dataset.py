@@ -203,11 +203,12 @@ set_seed(world_seed)
 #  TEST
 # ----------------------------------------------------------------------- #
 # Create dataset configuration
-micro_batch_size = 10
+micro_batch_size_per_rank = 20
+mini_batch_size_per_rank = 4
 config = DistributedSegmentedDatasetConfig(
-    full_dataset     = list(range(int(1e6))),
-    micro_batch_size = micro_batch_size,
-    world_size       = fsdp_world_size,
+    full_dataset              = list(range(int(1e6))),
+    micro_batch_size_per_rank = micro_batch_size_per_rank,
+    world_size                = fsdp_world_size,
 )
 
 # Initialize the dataset
@@ -215,6 +216,33 @@ dataset = DistributedSegmentedDataset(config)
 
 # Define checkpoint path
 checkpoint_path = "junk.segmented_dataset_checkpoint.pth"
+output_file_path = f"junk.global_indices_rank_{fsdp_rank}.txt"
+
+if True:
+    dataset.load_checkpoint_and_broadcast(checkpoint_path, fsdp_rank, device)
+    checkpoint_path = "junk.segmented_dataset_checkpoint.02.pth"
+    output_file_path = f"junk.global_indices_rank_{fsdp_rank}.02.txt"
+
+start_idx = dataset.start_idx
+with open(output_file_path, 'w') as f:
+    for segment_idx in range(200):
+        dataset.set_start_idx(start_idx)
+        start_idx = dataset.end_idx
+
+        sampler = torch.utils.data.DistributedSampler(dataset, shuffle=False, num_replicas=fsdp_world_size, rank=fsdp_rank)
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=mini_batch_size_per_rank, sampler=sampler)
+
+        for batch_idx, (global_idx, val) in enumerate(dataloader):
+            # Accessing the global_idx for each batch
+            f.write(f"{global_idx}, {val}\n")
+
+        if segment_idx == 101:  # Checkpoint saving condition
+            print(f"Rank {fsdp_rank}: Saving checkpoint at segment {segment_idx}")
+            dataset.save_checkpoint(checkpoint_path, fsdp_rank)
+            dist.barrier()
+            break
+
+print(f"Rank {fsdp_rank}: Indices exported to {output_file_path}")
 
 ## # Manually iterating over segments to simulate training loop
 ## for segment_idx in range(int(1e4)):
@@ -234,13 +262,13 @@ checkpoint_path = "junk.segmented_dataset_checkpoint.pth"
 ##         break
 
 
-# Load checkpoint
-dataset.load_checkpoint_and_broadcast(checkpoint_path, fsdp_rank, device)
-
-# Verify the loaded state
-print(f"[{fsdp_rank}] Loaded segment index: {dataset.current_segment_index}")
-print(f"[{fsdp_rank}] Loaded micro batch size: {dataset.micro_batch_size}")
-print(f"[{fsdp_rank}] Loaded start idx: {dataset.start_idx}")
+## # Load checkpoint
+## dataset.load_checkpoint_and_broadcast(checkpoint_path, fsdp_rank, device)
+## 
+## # Verify the loaded state
+## print(f"[{fsdp_rank}] Loaded segment index: {dataset.current_segment_index}")
+## print(f"[{fsdp_rank}] Loaded micro batch size: {dataset.micro_batch_size}")
+## print(f"[{fsdp_rank}] Loaded start idx: {dataset.start_idx}")
 
 dist.barrier()
 print(f"[{fsdp_rank}] Ending program...")
