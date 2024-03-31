@@ -18,57 +18,48 @@ from ..perf import Timer
 
 @dataclass
 class DistributedSegmentedDatasetConfig:
-    full_dataset    : List
-    micro_batch_size: int
-    world_size      : int
+    full_dataset             : List
+    micro_batch_size_per_rank: int
+    world_size               : int
 
 class DistributedSegmentedDataset(Dataset):
     def __init__(self, config: DistributedSegmentedDatasetConfig):
-        self.full_dataset          = config.full_dataset
-        self.micro_batch_size      = config.micro_batch_size
-        self.world_size            = config.world_size
-        self.total_size            = len(config.full_dataset)
-        self.segment_size          = self.micro_batch_size * self.world_size
-        self.total_segments        = (self.total_size + self.segment_size - 1) // self.segment_size
+        self.full_dataset              = config.full_dataset
+        self.micro_batch_size_per_rank = config.micro_batch_size_per_rank
+        self.world_size                = config.world_size
+        self.total_size                = len(config.full_dataset)
 
-        self.start_idx             = 0
-        self.end_idx               = 0
-        self.current_segment_index = 0
-        self.update_segment_indices()
+        self.start_idx  = 0
+        self.end_idx    = self.calculate_end_idx()
 
-    def update_segment_indices(self):
-        # Compute the global start and end indices of the current segment
-        segment_global_start = self.current_segment_index * self.segment_size
-        self.start_idx       = segment_global_start
-        self.end_idx         = min(segment_global_start + self.segment_size, self.total_size)
+    def calculate_end_idx(self):
+        # Calculate and return the end index for the current dataset segment.
+        return min(self.start_idx + self.micro_batch_size_per_rank * self.world_size, self.total_size)
 
-    def set_segment(self, segment_idx):
-        if segment_idx < 0 or segment_idx >= self.total_segments:
-            warnings.warn(f"Segment index {segment_idx} is out of bounds. Resetting to segment 0.")
-            segment_idx = 0
-        self.current_segment_index = segment_idx
-        self.update_segment_indices()
+    def set_start_idx(self, start_idx):
+        self.start_idx = start_idx
+        self.end_idx = self.calculate_end_idx()
 
     def __len__(self):
-        return min(self.segment_size, self.total_size - self.start_idx)
+        return self.end_idx - self.start_idx
 
     def __getitem__(self, idx):
+        # Ensure idx is within the bounds of the current segment
+        if idx >= (self.end_idx - self.start_idx):
+            raise IndexError("Index out of range for the current segment")
+
         # Map the local index to the correct global index within the segment
         global_idx = self.start_idx + idx
-        if global_idx >= self.total_size:
-            raise IndexError("Index out of range for the current segment")
-        return self.full_dataset[global_idx]
+        return global_idx, self.full_dataset[global_idx]
 
     def save_checkpoint(self, checkpoint_path, rank):
         if rank == 0:
             checkpoint = {
-                'current_segment_index': self.current_segment_index,
-                'last_world_size'      : self.world_size,
-                'last_micro_batch_size': self.micro_batch_size
+                'end_idx'       : self.end_idx,
+                'micro_batch_size_per_rank': self.micro_batch_size_per_rank
             }
             torch.save(checkpoint, checkpoint_path)
-        if dist.is_initialized():
-            dist.barrier()
+        dist.barrier()
 
     def load_checkpoint_and_broadcast(self, checkpoint_path, rank, device):
         checkpoint = None
@@ -77,29 +68,11 @@ class DistributedSegmentedDataset(Dataset):
         checkpoint = broadcast_dict(checkpoint, src=0, device=device)
 
         if checkpoint:
-            old_world_size = checkpoint['last_world_size']
-            current_world_size = self.world_size
+            self.set_start_idx(checkpoint.get('end_idx', 0))
+            if 'micro_batch_size_per_rank' in checkpoint and checkpoint['micro_batch_size_per_rank'] != self.micro_batch_size_per_rank:
+                warnings.warn(f"micro_batch_size_per_rank has been changed from {checkpoint['micro_batch_size_per_rank']} to {self.micro_batch_size_per_rank}. Resetting to {checkpoint['micro_batch_size_per_rank']}.")
+                self.micro_batch_size_per_rank = checkpoint['micro_batch_size_per_rank']
 
-            # Temporarily set the world size to the old one for correct segment calculation
-            self.world_size = old_world_size
-
-            if old_world_size != current_world_size:
-                warnings.warn(f"World size at checkpoint ({old_world_size}) does not match current world size ({current_world_size}).")
-
-            if 'last_micro_batch_size' in checkpoint and checkpoint['last_micro_batch_size'] != self.micro_batch_size:
-                warnings.warn(f"micro_batch_size has been changed from {checkpoint['last_micro_batch_size']} to {self.micro_batch_size}. Resetting to {checkpoint['last_micro_batch_size']}.")
-                self.micro_batch_size = checkpoint['last_micro_batch_size']
-
-            self.segment_size = self.micro_batch_size * old_world_size
-
-            # Use the old world size for setting the segment
-            self.set_segment(checkpoint['current_segment_index'])
-
-            # Restore the current world size and adjust dataset properties accordingly
-            self.world_size = current_world_size
-            self.segment_size = self.micro_batch_size * current_world_size
-
-    if dist.is_initialized():
         dist.barrier()
 
 
