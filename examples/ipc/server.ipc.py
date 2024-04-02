@@ -20,43 +20,23 @@ def get_psana_img(exp, run, access_mode, detector_name):
     return psana_img_buffer[key]
 
 
-shared_memory_registry = {}
-
-def register_shared_memory(shm_name, initial_state='pending_ack'):
-    shared_memory_registry[shm_name] = initial_state
-
-def mark_shared_memory_for_cleanup(shm_name):
-    shared_memory_registry[shm_name] = 'ready_to_unlink'
-
-def cleanup_eligible_shared_memory():
-    for shm_name, state in list(shared_memory_registry.items()):
-        if state == 'ready_to_unlink':
-            try:
-                shm = shared_memory.SharedMemory(name=shm_name)
-                shm.unlink()
-                print(f"Cleaned up {shm_name}")
-                del shared_memory_registry[shm_name]  # Remove from registry after successful cleanup
-            except FileNotFoundError:
-                print(f"Already cleaned: {shm_name}")
-                del shared_memory_registry[shm_name]  # Safe to remove if already unlinked
-
-def cleanup_shared_memory(shm):
-    try:
-        shm.close()
-        shm.unlink()
-    except FileNotFoundError:
-        pass
+## def cleanup_shared_memory(shm):
+##     try:
+##         shm.close()
+##         shm.unlink()
+##     except FileNotFoundError:
+##         pass
 
 def worker_process(server_socket):
-    # Keep track of all shared memory objects created in this process
-    shared_memories = []
+    ## # Keep track of all shared memory objects created in this process
+    ## shared_memories = []
 
-    def cleanup_at_exit():
-        for shm in shared_memories:
-            cleanup_shared_memory(shm)
+    ## def cleanup_at_exit():
+    ##     for shm in shared_memories:
+    ##         cleanup_shared_memory(shm)
 
-    # Register the cleanup function to run when the process exits
-    atexit.register(cleanup_at_exit)
+    ## # Register the cleanup function to run when the process exits
+    ## atexit.register(cleanup_at_exit)
 
     while True:
         # Accept a new connection
@@ -82,8 +62,8 @@ def worker_process(server_socket):
             shared_array = np.ndarray(data.shape, dtype=data.dtype, buffer=shm.buf)
             shared_array[:] = data
 
-            # Add the shared memory object to the list for tracking
-            shared_memories.append(shm)
+            ## # Add the shared memory object to the list for tracking
+            ## shared_memories.append(shm)
 
             response_data = json.dumps({
                 'name': shm.name,
