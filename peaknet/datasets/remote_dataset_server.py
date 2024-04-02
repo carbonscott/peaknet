@@ -32,7 +32,7 @@ def fetch_psana():
     access_mode   = request.json.get('access_mode')
     detector_name = request.json.get('detector_name')
     event         = request.json.get('event')
-    mode          = request.json.get('mode', 'calib')
+    mode          = request.json.get('mode', 'image')
 
     psana_img = get_psana_img(exp, run, access_mode, detector_name)
 
