@@ -69,6 +69,7 @@ class IPCRemotePsanaDataset(Dataset):
                 # Ensure shared memory is closed even if an exception occurs
                 if shm:
                     shm.close()
+                    shm.unlink()
 
             # Send acknowledgment after successfully accessing shared memory
             sock.sendall("ACK".encode('utf-8'))

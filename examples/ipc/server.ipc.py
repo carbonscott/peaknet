@@ -97,9 +97,7 @@ def worker_process(server_socket):
             # Wait for the client's acknowledgment
             ack = connection.recv(1024).decode('utf-8')
             if ack == "ACK":
-                # Only unlink the shared memory after receiving acknowledgment
-                shm.unlink()
-                print(f"Shared memory {shm.name} unlinked successfully.")
+                print(f"Shared memory {shm.name} ready for client to unlink.")
             else:
                 print("Did not receive proper acknowledgment from client.")
 
