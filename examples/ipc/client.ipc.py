@@ -32,8 +32,7 @@ class IPCRemotePsanaDataset(Dataset):
         return self.fetch_event(*request)
 
     def fetch_event(self, exp, run, access_mode, detector_name, event):
-        # Corrected to use a TCP/IP socket
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:  # Use AF_INET for TCP/IP
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.connect(self.server_address)
 
             # Send request
