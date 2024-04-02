@@ -52,8 +52,8 @@ class IPCRemotePsanaDataset(Dataset):
 
             # Use the JSON data to access the shared memory
             shm_name = response_json['name']
-            shape = response_json['shape']
-            dtype = np.dtype(response_json['dtype'])
+            shape    = response_json['shape']
+            dtype    = np.dtype(response_json['dtype'])
 
             # Initialize shared memory outside of try block to ensure it's in scope for finally block
             shm = None

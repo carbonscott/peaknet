@@ -57,7 +57,7 @@ def worker_process(server_socket):
             with Timer(tag=None, is_on=True) as t:
                 data = psana_img.get(event, None, mode)
 
-            # Assuming 'data' is a numpy array here; adjust as needed based on actual data type
+            # Keep numpy array in a shared memory
             shm = shared_memory.SharedMemory(create=True, size=data.nbytes)
             shared_array = np.ndarray(data.shape, dtype=data.dtype, buffer=shm.buf)
             shared_array[:] = data
