@@ -75,25 +75,29 @@ class IPCRemotePsanaDataset(Dataset):
 
             return result
 
-# Usage example
-server_address = ('localhost', 5002)
-requests_list = [ ('xpptut15'   , 630, 'idx', 'jungfrau1M', event) for event in range(1000) ] +\
-                [ ('mfxp1002121',   7, 'idx',    'Rayonix', event) for event in range(1000) ]
+if __name__ == "__main__":
+    server_address = ('localhost', 5000)
+    requests_list = [ ('xpptut15'   , 630, 'idx', 'jungfrau1M', event) for event in range(1000) ] +\
+                    [ ('mfxp1002121',   7, 'idx',    'Rayonix', event) for event in range(1000) ]
 
-dataset = IPCRemotePsanaDataset(server_address = server_address, requests_list = requests_list)
+    dataset = IPCRemotePsanaDataset(server_address = server_address, requests_list = requests_list)
 
-dataloader = DataLoader(dataset, batch_size=20, num_workers=10, prefetch_factor = None)
-dataloader_iter = iter(dataloader)
-batch_idx       = 0
-while True:
-    try:
-        t_s = time.monotonic()
-        batch_data = next(dataloader_iter)
-        t_e = time.monotonic()
-        loading_time_in_sec = (t_e - t_s)
+    dataloader = DataLoader(dataset, batch_size=20, num_workers=10, prefetch_factor = None)
+    dataloader_iter = iter(dataloader)
+    batch_idx       = 0
+    while True:
+        try:
+            t_s = time.monotonic()
+            batch_data = next(dataloader_iter)
+            t_e = time.monotonic()
+            loading_time_in_sec = (t_e - t_s)
 
-        print(f"Batch idx: {batch_idx:d}, Total time: {loading_time_in_sec:.2f} s, Average time: {loading_time_in_sec / len(batch_data) * 1e3:.2f} ms/event, Batch shape: {batch_data.shape}")
+            print(f"Batch idx: {batch_idx:d}, Total time: {loading_time_in_sec:.2f} s, Average time: {loading_time_in_sec / len(batch_data) * 1e3:.2f} ms/event, Batch shape: {batch_data.shape}")
 
-        batch_idx += 1
-    except StopIteration:
-        break
+            batch_idx += 1
+        except StopIteration:
+            break
+
+    ## with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    ##     sock.connect(server_address)
+    ##     sock.sendall("DONE".encode('utf-8'))
