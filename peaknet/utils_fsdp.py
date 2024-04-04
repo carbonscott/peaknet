@@ -233,7 +233,8 @@ class MemoryMaximizer:
 # nccl version to verify bfloat16 native support is ready
 
 verify_bfloat_support = (
-    torch.version.cuda
+    torch.cuda.is_available()
+    and torch.version.cuda
     and torch.cuda.is_bf16_supported()
     and packaging.version.parse(torch.version.cuda).release >= (11, 0)
     and dist.is_nccl_available()
