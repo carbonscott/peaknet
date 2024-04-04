@@ -255,7 +255,7 @@ while starts_loop or start_idx < len(full_dataset):
         except StopIteration:
             break
 
-dist.barrier()
-print(f"[{fsdp_rank}] Ending program...")
 if dist.is_initialized():
+    dist.barrier()
+    print(f"[{fsdp_rank}] Ending program...")
     dist.destroy_process_group()
