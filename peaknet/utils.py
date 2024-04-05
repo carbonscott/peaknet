@@ -423,3 +423,7 @@ def print_layers(module, max_depth=1, current_indent_width=0, prints_module_name
                 _print_current_layer(child, depth + 1, current_indent_width + 1, prints_module_name)
 
     _print_current_layer(module, current_indent_width=current_indent_width, prints_module_name=prints_module_name)
+
+
+def is_action_due(iter_num, log_interval):
+    return iter_num % log_interval == 0
