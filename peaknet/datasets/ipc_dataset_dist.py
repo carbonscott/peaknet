@@ -160,3 +160,95 @@ class IPCDistributedSegmentedDataset(Dataset):
             sock.sendall("ACK".encode('utf-8'))
 
             return result
+
+@dataclass
+class IPCDatasetConfig:
+    """Configuration for the Inter-Processor Communication based Dataset.
+
+    Attributes:
+        full_dataset (List): The complete dataset details to be segmented and distributed.
+        transforms (List): A list of transformations to apply to each data item.
+        is_perf (bool): Flag to enable performance timing for transformations. Default is False.
+        server_address (str): URL of the server to fetch data from. Defaults to 'http://localhost:5001'.
+    """
+    full_dataset             : List
+    transforms               : List
+    is_perf                  : bool = False
+    server_address           : Tuple = ('localhost', 5000)
+
+class IPCDataset(Dataset):
+    """A dataset class designed for fetching data through Inter-Processor
+    Communication.
+
+    This class allows for efficient data loading and processing across multiple
+    distributed processes.
+    """
+    def __init__(self, config: IPCDatasetConfig):
+        self.full_dataset   = config.full_dataset
+        self.server_address = config.server_address
+        self.transforms     = config.transforms
+        self.is_perf        = config.is_perf
+
+    def __len__(self):
+        return len(config.full_dataset)
+
+    def __getitem__(self, idx):
+        # Obtain dataset handle
+        exp, run, access_mode, detector_name, event = self.full_dataset[idx]
+
+        # Fetch event
+        image = self.fetch_event(exp, run, access_mode, detector_name, event)    # psana image: (H, W)
+
+        # Apply transforms
+        image_tensor = None
+        if image is not None and self.transforms is not None:
+            image_tensor = torch.from_numpy(image[None, None])    # (B=1, C, H, W)
+            for enum_idx, trans in enumerate(self.transforms):
+                with Timer(tag = None, is_on = self.is_perf):
+                    image_tensor = trans(image_tensor)
+
+        return image_tensor[0]    # Dataloader only wants data with shape of (C, H, W)
+
+    def fetch_event(self, exp, run, access_mode, detector_name, event):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.connect(self.server_address)
+
+            # Send request
+            request_data = json.dumps({
+                'exp'          : exp,
+                'run'          : run,
+                'access_mode'  : access_mode,
+                'detector_name': detector_name,
+                'event'        : event,
+                'mode'         : 'image',
+            })
+            sock.sendall(request_data.encode('utf-8'))
+
+            # Receive and process response
+            response_data = sock.recv(4096).decode('utf-8')
+            response_json = json.loads(response_data)
+
+            # Use the JSON data to access the shared memory
+            shm_name = response_json['name']
+            shape    = response_json['shape']
+            dtype    = np.dtype(response_json['dtype'])
+
+            # Initialize shared memory outside of try block to ensure it's in scope for finally block
+            shm = None
+            try:
+                # Access the shared memory
+                shm = shared_memory.SharedMemory(name=shm_name)
+                data_array = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+
+                # Convert to numpy array (this creates a copy of the data)
+                result = np.array(data_array)
+            finally:
+                # Ensure shared memory is closed even if an exception occurs
+                if shm:
+                    shm.close()
+                    shm.unlink()
+
+            # Send acknowledgment after successfully accessing shared memory
+            sock.sendall("ACK".encode('utf-8'))
+
+            return result
