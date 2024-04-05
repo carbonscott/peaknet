@@ -4,11 +4,12 @@ import math
 
 class CosineLRScheduler(_LRScheduler):
     def __init__(self, optimizer, warmup_epochs, total_epochs, min_lr=0, last_epoch=-1):
-        self.warmup_epochs = warmup_epochs
-        self.total_epochs = total_epochs
-        self.min_lr = min_lr
-        self.decay_epochs = self.total_epochs - self.warmup_epochs
         super().__init__(optimizer, last_epoch)
+
+        self.warmup_epochs = warmup_epochs
+        self.total_epochs  = total_epochs
+        self.min_lr        = min_lr
+        self.decay_epochs  = self.total_epochs - self.warmup_epochs
 
     def get_lr(self):
         """
@@ -29,3 +30,14 @@ class CosineLRScheduler(_LRScheduler):
         decay_ratio = (self.last_epoch - self.warmup_epochs) / self.decay_epochs
         cosine_decay = 0.5 * (1 + math.cos(math.pi * decay_ratio))
         return [self.min_lr + (base_lr - self.min_lr) * cosine_decay for base_lr in self.base_lrs]
+
+    def reset(self):
+        # Reset last_epoch to its initial value
+        self.last_epoch = -1
+
+        # Reset optimizer's learning rates to initial base_lrs
+        for i, param_group in enumerate(self.optimizer.param_groups):
+            param_group['lr'] = self.base_lrs[i]
+
+        # Ensure the internal state is consistent
+        self.get_lr()
