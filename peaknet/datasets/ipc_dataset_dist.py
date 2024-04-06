@@ -19,6 +19,9 @@ from typing import Optional, List, Tuple
 from ..utils_fsdp import broadcast_dict
 from ..perf import Timer
 
+# ----------------------------------------------------------------------- #
+#  DATALOADER FOR TRAINING BY ALL RANKS
+# ----------------------------------------------------------------------- #
 @dataclass
 class IPCDistributedSegmentedDatasetConfig:
     """Configuration for the Remote Distributed Segmented Dataset.
@@ -161,6 +164,10 @@ class IPCDistributedSegmentedDataset(Dataset):
 
             return result
 
+
+# ----------------------------------------------------------------------- #
+#  DATALOADER FOR EVALUATION BY RANK0
+# ----------------------------------------------------------------------- #
 @dataclass
 class IPCDatasetConfig:
     """Configuration for the Inter-Processor Communication based Dataset.
