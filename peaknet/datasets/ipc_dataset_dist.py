@@ -98,7 +98,7 @@ class IPCDistributedSegmentedDataset(Dataset):
     def save_checkpoint(self, checkpoint_path, rank):
         if rank == 0:
             checkpoint = {
-                'end_idx'       : self.end_idx,
+                'end_idx'                  : self.end_idx,
                 'micro_batch_size_per_rank': self.micro_batch_size_per_rank
             }
             torch.save(checkpoint, checkpoint_path)
