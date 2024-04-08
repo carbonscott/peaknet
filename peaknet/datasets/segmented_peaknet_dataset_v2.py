@@ -76,11 +76,11 @@ class SegmentedPeakNetDataset(Dataset):
 
             # Obtain image
             k = f"images"
-            image = f.get(k)[idx_in_hdf5][()]
+            image = f.get(k)[idx_in_hdf5]
 
             # Obtain label
             k = f"labels"
-            label = f.get(k)[idx_in_hdf5][()]
+            label = f.get(k)[idx_in_hdf5]
 
             # Obtain pixel map
             k = f"data/data_{idx_in_hdf5:04d}/metadata/pixel_map"
