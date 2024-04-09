@@ -1,0 +1,81 @@
+checkpoint:
+  chkpt_saving_period: 5
+  directory          : experiments/chkpts
+  filename_prefix    : {{ filename_prefix }}
+  path_chkpt_prev    : null
+  pretrain           : {{ path_pretrain_chkpt|default(null) }}
+dataset:
+  batch_size   : {{ batch_size }}
+  num_workers  : {{ num_workers }}
+  path_train   : experiments/datasets/{{ path_train }}
+  path_validate: experiments/datasets/{{ path_validate }}
+  seg_size     : {{ seg_size }}
+  transforms:
+    H_pad: 2048
+    W_pad: 2048
+    num_patch: 100
+    size_patch: 20
+    angle_max: 360
+    frac_shift_max: 0.1
+    downscale_factors: [2, 2]
+    var_size_patch: 0.2
+fsdp:
+  backend               : nccl
+  uses_unique_world_seed: true
+  dtype                 : {{ fsdp_dtype }}
+logging:
+  directory      : experiments/logs
+  filename_prefix: {{ filename_prefix }}
+loss:
+  focal:
+    alpha: 1.0
+    gamma: 2.0
+  grad_accum_steps: {{ grad_accum_steps }}
+lr_scheduler:
+  min_lr           : !!float 1e-7
+  total_iterations : !!int 1_000_000
+  uses_prev        : true
+  warmup_iterations: 5
+misc:
+  max_epochs          : 200
+  max_eval_iter       : {{ max_eval_iter }}
+  num_gpus            : {{ num_gpus }}
+  num_nodes           : {{ num_nodes }}
+  uses_mixed_precision: true
+  compiles_model      : true
+model:
+  backbone:
+    in_channels    : 1
+    model_name     : {{ model_name }}
+    uses_pretrained: True
+  bifpn:
+    num_blocks: 1
+    block:
+      relu_inplace     : False
+      down_scale_factor: 0.5
+      up_scale_factor  : 2
+      num_features     : 256
+      num_levels       : 4
+      base_level       : 4    # ...ResNet50 uses 2, EfficientNet uses 3
+      bn:
+        eps     : !!float 1e-5
+        momentum: !!float 1e-1
+      fusion:
+        eps: !!float 1e-5
+  freezes_backbone   : false
+  seg_head:
+    up_scale_factor:
+      - 4  # stage0
+      - 8  # stage1
+      - 16 # stage2
+      - 32 # stage3
+    num_groups           : 32
+    out_channels         : 256
+    num_classes          : 2
+    base_scale_factor    : 2
+    uses_learned_upsample: False
+    num_classes          : 2
+optim:
+  grad_clip   : 1.0
+  lr          : !!float 2e-4
+  weight_decay: !!float 1e-4
