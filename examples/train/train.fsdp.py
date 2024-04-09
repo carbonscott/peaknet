@@ -10,24 +10,23 @@ import argparse
 import logging
 
 from functools import partial
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 
 # -- PeakNet specific imports
-from peaknet.datasets.ipc_dataset_dist     import IPCDistributedSegmentedDatasetConfig, IPCDistributedSegmentedDataset, IPCDatasetConfig, IPCDataset
+from peaknet.datasets.segmented_safetensor_dataset import SegmentedPeakNetDataset
+## from peaknet.datasets.ipc_dataset_dist     import IPCDistributedSegmentedDatasetConfig, IPCDistributedSegmentedDataset, IPCDatasetConfig, IPCDataset
 from peaknet.modeling.convnextv2_bifpn_net import PeakNetConfig, PeakNet, SegHeadConfig
 from peaknet.modeling.convnextv2_encoder   import ConvNextV2BackboneConfig
 from peaknet.modeling.bifpn_config         import BiFPNConfig, BiFPNBlockConfig, BNConfig, FusionConfig
 from peaknet.criterion                     import CategoricalFocalLoss
 from peaknet.utils                         import init_logger, set_seed, is_action_due
 from peaknet.lr_scheduler                  import CosineLRScheduler
-from peaknet.perf                          import Timer
+## from peaknet.perf                          import Timer
 from peaknet.tensor_transforms             import Pad, DownscaleLocalMean, RandomPatch, RandomRotate, RandomShift
 from peaknet.utils_fsdp                    import (
     MemoryMaximizer,
     verify_bfloat_support,
     TrainingStateDictConfig,
-    FullStateDictCheckpointConfig,
-    FullStateDictCheckpoint,
     ShardedStateDictCheckpointConfig,
     ShardedStateDictCheckpoint,
 )
@@ -42,15 +41,17 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     MixedPrecision,
     ShardingStrategy,
-
     BackwardPrefetch,
-    FullStateDictConfig,
-    StateDictType,
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.distributed.fsdp.wrap                import size_based_auto_wrap_policy, enable_wrap, wrap
 import torch.distributed as dist
 
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy, enable_wrap, wrap
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    apply_activation_checkpointing,
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
 
 
 torch.autograd.set_detect_anomaly(False)    # [WARNING] Making it True may throw errors when using bfloat16
@@ -91,7 +92,8 @@ epoch_unstable_end  = chkpt_config.get("epoch_unstable_end")
 dataset_config    = config.get("dataset")
 path_train_csv    = dataset_config.get("path_train")
 path_validate_csv = dataset_config.get("path_validate")
-size_batch        = dataset_config.get("batch_size")
+seg_size          = dataset_config.get("seg_size")
+batch_size        = dataset_config.get("batch_size")
 num_workers       = dataset_config.get("num_workers")
 transforms_config = dataset_config.get("transforms")
 num_patch         = transforms_config.get("num_patch")
@@ -105,7 +107,6 @@ W_pad             = transforms_config.get("W_pad")
 
 # -- Model
 model_params              = config.get("model")
-uses_random_weights       = model_params.get("uses_random_weights")
 freezes_backbone          = model_params.get("freezes_backbone")
 backbone_params           = model_params.get("backbone")
 bifpn_params              = model_params.get("bifpn")
@@ -116,10 +117,11 @@ seghead_params            = model_params.get("seg_head")
 seghead_num_classes       = seghead_params.get("num_classes")
 
 # -- Loss
-loss_config  = config.get("loss")
-focal_config = loss_config.get("focal")
-focal_alpha  = focal_config.get("alpha")
-focal_gamma  = focal_config.get("gamma")
+loss_config      = config.get("loss")
+focal_config     = loss_config.get("focal")
+focal_alpha      = focal_config.get("alpha")
+focal_gamma      = focal_config.get("gamma")
+grad_accum_steps = min(loss_config.get("grad_accum_steps"), 1)
 
 # -- Optimizer
 optim_config = config.get("optim")
@@ -135,11 +137,11 @@ total_epochs        = lr_scheduler_config.get("total_epochs")
 uses_prev_scheduler = lr_scheduler_config.get("uses_prev")
 min_lr              = float(lr_scheduler_config.get("min_lr"))
 
-
 # -- FSDP
 fsdp_config            = config.get("fsdp")
 fsdp_backend           = fsdp_config.get("backend")
 uses_unique_world_seed = fsdp_config.get("uses_unique_world_seed")
+fsdp_dtype             = fsdp_config.get("dtype")
 
 # -- Logging
 logging_config = config.get("logging")
@@ -150,9 +152,9 @@ fl_log_prefix = logging_config.get("filename_prefix")
 misc_config = config.get("misc")
 uses_mixed_precision = misc_config.get("uses_mixed_precision")
 max_epochs           = misc_config.get("max_epochs")
+max_eval_iter        = misc_config.get("max_eval_iter")
 num_gpus             = misc_config.get("num_gpus")
 compiles_model       = misc_config.get("compiles_model")
-cache_clear_after_n_batch = 5
 
 # ----------------------------------------------------------------------- #
 #  MISC FEATURES
@@ -197,23 +199,21 @@ memmax = MemoryMaximizer if fsdp_local_rank == 0 else None
 
 # -- FSDP policy
 # --- Mixed precision
-dtype           = 'float32'
 mixed_precision = None
-if uses_mixed_precision:
-    if verify_bfloat_support:
-        dtype = 'bfloat16'
-        mixed_precision = MixedPrecision(
-            param_dtype  = torch.bfloat16,
-            reduce_dtype = torch.bfloat16,
-            buffer_dtype = torch.bfloat16,
-        )
-    else:
-        dtype = 'float16'
-        mixed_precision = MixedPrecision(
-            param_dtype  = torch.float16,
-            reduce_dtype = torch.float16,
-            buffer_dtype = torch.float16,
-        )
+if verify_bfloat_support:
+    fsdp_dtype = 'bfloat16'
+    mixed_precision = MixedPrecision(
+        param_dtype  = torch.bfloat16,
+        reduce_dtype = torch.bfloat16,
+        buffer_dtype = torch.bfloat16,
+    )
+else:
+    fsdp_dtype = 'float16'
+    mixed_precision = MixedPrecision(
+        param_dtype  = torch.float16,
+        reduce_dtype = torch.float16,
+        buffer_dtype = torch.float16,
+    )
 
 # --- Sharding strategy
 sharding_strategy = ShardingStrategy.FULL_SHARD
@@ -222,6 +222,16 @@ sharding_strategy = ShardingStrategy.FULL_SHARD
 min_num_params   = 500_000
 auto_wrap_policy = partial(size_based_auto_wrap_policy,
                            min_num_params = min_num_params,)
+
+# --- Activation checkpointing
+non_reentrant_wrapper = partial(
+    checkpoint_wrapper,
+    offload_to_cpu  = False,
+    checkpoint_impl = CheckpointImpl.NO_REENTRANT,
+)
+
+# --- Backward prefetch policy
+backward_prefetch = BackwardPrefetch.BACKWARD_PRE
 
 # -- Logging
 if fsdp_rank == 0:
@@ -251,24 +261,16 @@ transforms = (
     RandomRotate(angle_max),
     RandomShift(frac_y_shift_max=frac_shift_max, frac_x_shift_max=frac_shift_max),
 )
-
-# -- Config and define the dataset
-mini_batch_size_per_rank = 20
-gradient_accumulation_steps = 5
-micro_batch_size_per_rank = mini_batch_size_per_rank * gradient_accumulation_steps
-train_dataset = [ ('xpptut15'   , 630, 'idx', 'jungfrau1M', event) for event in range(1000) ] +\
-                [ ('mfxp1002121',   7, 'idx',    'Rayonix', event) for event in range(1000) ]
-validate_dataset = [ ('xpptut15'   , 630, 'idx', 'jungfrau1M', event) for event in range(1000) ] +\
-                   [ ('mfxp1002121',   7, 'idx',    'Rayonix', event) for event in range(1000) ]
-train_config = IPCDistributedSegmentedDatasetConfig(
-    full_dataset              = train_dataset,
-    micro_batch_size_per_rank = micro_batch_size_per_rank,
-    world_size                = fsdp_world_size,
-    transforms                = transforms,
-    is_perf                   = True,
-    server_address            = ('localhost', 5000),
-)
-dataset_train = IPCDistributedSegmentedDataset(train_config)
+dataset_train    = SegmentedPeakNetDataset(path_csv      = path_train_csv,
+                                           seg_size      = seg_size,
+                                           dtype         = None,
+                                           transforms    = transforms,
+                                           perfs_runtime = False)
+dataset_validate = SegmentedPeakNetDataset(path_csv      = path_validate_csv,
+                                           seg_size      = None,
+                                           dtype         = None,
+                                           transforms    = transforms,
+                                           perfs_runtime = False)
 
 
 # ----------------------------------------------------------------------- #
@@ -305,17 +307,15 @@ if freezes_backbone:
 
 
 # -- Mixed precision
-dtype = 'float16'
-mixed_precision_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
+mixed_precision_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[fsdp_dtype]
 
 # --- Autocast
 device_type = 'cuda' if 'cuda' in device else 'cpu'
 autocast_context = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=mixed_precision_dtype)
 
-# --- GradScaler. 
+# --- GradScaler
 # If enabled=False scaler is a no-op
-scaler = ShardedGradScaler(enabled=(dtype == dtype))
-
+scaler = ShardedGradScaler(enabled=(fsdp_dtype == 'float16'))
 
 # -- Compile the model
 if compiles_model:
@@ -328,18 +328,34 @@ if uses_fsdp:
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
     # Wrap it up using FSDP...
-    model = FSDP(model,
-                 auto_wrap_policy  = auto_wrap_policy,
-                 mixed_precision   = mixed_precision,
-                 sharding_strategy = sharding_strategy,
-                 device_id         = device)
+    model = FSDP(
+        model,
+        auto_wrap_policy  = auto_wrap_policy,
+        mixed_precision   = mixed_precision,
+        backward_prefetch = backward_prefetch,
+        forward_prefetch  = True,
+        sharding_strategy = sharding_strategy,
+        limit_all_gathers = True,
+        device_id         = device,
+    )
 
     sharded_param_count = sum(p.numel() for p in model.module.parameters())
     print(f"RANK {fsdp_rank} - sharded parameter count: {sharded_param_count*1e-6} M.")
 
     dist.barrier()
 
-no_sync_context = model.no_sync() if uses_fsdp else nullcontext()
+# [IMPROVE] Re-consider the conditional if cpu offloading is used
+no_grad_sync_context = model.no_sync() if grad_accum_steps > 1 else nullcontext()
+
+# -- [TODO] Apply activation checkpointing
+ac_layer = None
+if ac_layer is not None:
+    check_fn = lambda submodule: isinstance(submodule, ac_layer)
+    apply_activation_checkpointing(
+        model,
+        checkpoint_wrapper_fn = non_reentrant_wrapper,
+        check_fn              = check_fn
+    )
 
 if fsdp_rank == 0:
     print(f"Current timestamp: {timestamp}")
@@ -369,16 +385,12 @@ scheduler = CosineLRScheduler(optimizer     = optimizer,
 # ----------------------------------------------------------------------- #
 #  CHECKPOINT (SHARDED STATE DICT)
 # ----------------------------------------------------------------------- #
-# -- Training state dict
-epoch_min   = 0
-mini_batch  = 0
-micro_batch = 0
-loss_min    = float('inf')
+# -- Set init training state dict
 training_state_dict_config = TrainingStateDictConfig(
-    epoch       = epoch_min,
-    mini_batch  = mini_batch,
-    micro_batch = micro_batch,
-    loss_min    = loss_min,
+    epoch     = 0,
+    start_idx = dataset_train.start_idx,
+    seg_size  = dataset_train.seg_size,
+    loss_min  = float('inf'),
 )
 
 # -- Sharded state dict
@@ -400,47 +412,34 @@ if path_chkpt_prev is not None:
 
         training_state = checkpointer.config.training_state
         epoch_min      = training_state.epoch
-        mini_batch     = training_state.mini_batch
-        micro_batch    = training_state.micro_batch
+        start_idx_prev = training_state.start_idx
+        seg_size_prev  = training_state.seg_size
         loss_min       = training_state.loss_min
 
-        ## print(colorama.Fore.RED + f"RANK {fsdp_rank} - epoch_min   = {epoch_min  }")
-        ## print(colorama.Fore.RED + f"RANK {fsdp_rank} - mini_batch  = {mini_batch }")
-        ## print(colorama.Fore.RED + f"RANK {fsdp_rank} - micro_batch = {micro_batch}")
-        ## print(colorama.Fore.RED + f"RANK {fsdp_rank} - loss_min    = {loss_min   }")
-
-        mini_batch  += 1
-        micro_batch += 1
+        dataset_train.set_seg(start_idx_prev, seg_size_prev)
         scheduler.step()    # [TODO] Need to take care of the scheduler checkpointing
         logger.info(f"PREV - epoch_min = {epoch_min}, loss_min = {loss_min}")
 
-## # Let's simulate saving a sharded state dict chkpt...
-## training_state = TrainingStateDictConfig(**dict(
-##     epoch       = 4,
-##     micro_batch = 10,
-##     mini_batch  = 10,
-##     loss_min    = 0.2,
-## ))
-## if path_chkpt_prev is None:
-##     path_chkpt = None
-##     if fsdp_rank == 0:
-##         epoch = training_state.epoch
-##         micro_batch = training_state.micro_batch
-##         dir_chkpt = f"{timestamp}.epoch_{epoch}.microbatch_{micro_batch}"
-##         if dir_chkpt_prefix is not None: dir_chkpt = f"{dir_chkpt_prefix}.{dir_chkpt}"
-##         path_chkpt = os.path.join(dir_root_chkpt, dir_chkpt)
-##     checkpointer.save(model, optimizer, scheduler, training_state, path_chkpt)
-## 
-## dist.barrier()
-## if dist.is_initialized():
-##     dist.destroy_process_group()
 
+# ----------------------------------------------------------------------- #
+#  HELPER
+# ----------------------------------------------------------------------- #
 @torch.no_grad()
-def estimate_loss(dataloader, model, criterion, autocast_context):
+def estimate_loss(dataloader, model, criterion, autocast_context, max_iter = None):
+    ''' Estimate loss.
+        The dataloader should be wrapped with Dataloader class or
+        DistributedSampler class, best with shuffle being true.  The shuffle
+        takes place before batching.
+    '''
     model.eval()
+
+    if max_iter is None:
+        max_iter = len(dataloader)
 
     losses = torch.zeros(len(dataloader))
     for enum_idx, batch_data in enumerate(dataloader):    # (B, C, H, W)
+        if enum_idx + 1 > max_iter: break
+
         batch_input, batch_target = batch_data
         batch_input  = batch_input.to(device, non_blocking = True)
         batch_target = batch_target.to(device, non_blocking = True)
@@ -455,101 +454,128 @@ def estimate_loss(dataloader, model, criterion, autocast_context):
 
     return losses.mean()
 
+def is_last_batch(batch_idx, num_batches):
+    return batch_idx + 1 == num_batches
 
 # ----------------------------------------------------------------------- #
 #  TRAINING LOOP
 # ----------------------------------------------------------------------- #
 try:
+    # -- Train one epoch
     for epoch in tqdm.tqdm(range(max_epochs)):
         # -- Restore epoch and starting micro batch index
         epoch += epoch_min
 
-        # -- Shuffle the training examples
-        if uses_fsdp:
-            sampler_train.set_epoch(epoch)
-
-        # -- Train one epoch
+        # Train one micro batch/segment
+        micro_batch = 0
         while dataset_train.end_idx < len(dataset_train):
+            # [PERFORMANCE]
+            if fsdp_local_rank == 0:
+                memmax.start()
+
             # -- Switch to training state
             model.train()
 
-            # -- Train one micro batch (iteration)
-            # Set micro batch
-            dataset_train.set_start_idx(micro_batch)    # It actually sets the end idx too, need a better name
+            # -- Prepare training of one micro batch (iteration)
+            # Set next micro batch
+            dataset_train.set_next_seg()
 
             # Split sampler across ranks
             sampler = torch.utils.data.DistributedSampler(dataset_train, shuffle=False)
-            dataloader = torch.utils.data.DataLoader(dataset_train, batch_size=mini_batch_size_per_rank, sampler=sampler, num_workers = num_workers)
+            dataloader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, sampler=sampler, num_workers = num_workers)
 
-            # Turn off grad sync for every batch to simulate a larger batch size
-            with no_sync_context:
-                # -- Train one mini batch
-                for batch_data in dataloader:    # (B, C, H, W)
-                    batch_input, batch_target = batch_data
-                    batch_input  = batch_input.to(device, non_blocking = True)
-                    batch_target = batch_target.to(device, non_blocking = True)
+            # Shuffle the training example
+            sampler.set_epoch(epoch)
 
-                    with autocast_context:
-                        # Forward
-                        batch_output = model(batch_input)
-                        loss = criterion(batch_output, batch_target)
-                        loss = loss.mean()
-                        loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
+            # -- Train one mini batch
+            grad_accum_counter = 0
+            for batch_idx, batch_data in enumerate(dataloader):    # (B, C, H, W)
+                batch_input, batch_target = batch_data
+                batch_input  = batch_input.to(device, non_blocking = True)
+                batch_target = batch_target.to(device, non_blocking = True)
 
-                        # Backward
-                        scaler.scale(loss).backward()
+                # Forward
+                with autocast_context:
+                    batch_output = model(batch_input)
+                    loss = criterion(batch_output, batch_target)
+                    loss = loss.mean()
+                    loss = loss / grad_accum_steps # scale the loss to account for gradient accumulation
 
-                    mini_batch += 1
+                # Backward
+                # Turn off grad sync for every batch to simulate a larger batch size
+                with no_grad_sync_context:
+                    scaler.scale(loss).backward()
 
-            # Grad clipping
-            if grad_clip != 0.0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                # Increment the grad accum counter
+                grad_accum_counter += 1
 
-            # Update parameters
-            scaler.step(optimizer)
-            scaler.update()
+                # Conditional paramter updates either when it's due or the last batch
+                if is_action_due(grad_accum_counter, grad_accum_steps) or is_last_batch(batch_idx, len(dataloader)):
+                    # Grad clipping
+                    if grad_clip != 0.0:
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
 
-            # Flush the gradients
-            optimizer.zero_grad(set_to_none=True)
+                    # Update parameters
+                    scaler.step(optimizer)
+                    scaler.update()
 
-            # Next micro batch
+                    # Flush the gradients
+                    optimizer.zero_grad(set_to_none=True)
+
+                    # Reset grad accum counter
+                    grad_accum_counter = 0
+
+            # Track and update micro batch for conditional logging and eval
             micro_batch += 1
 
             # -- Eval and checkpointing by rank 0
-            # [TODO] Need a good strategy, maybe rank0 does quick evaluation and decide if sharded state dict should be saved
+            # Rank0 performs evaluation and decide if a sharded state dict should be saved
             if is_action_due(micro_batch, chkpt_saving_period) and fsdp_rank == 0:
                 # -- Eval
                 # --- Train
-                eval_dataset = random.sample(train_dataset[:max(mini_batch, eval_sample_size)], eval_sample_size)
-                eval_config = IPCDatasetConfig(
-                    full_dataset   = eval_dataset,
-                    transforms     = transforms,
-                    is_perf        = True,
-                    server_address = ('localhost', 5000),
-                )
-                dataset_eval = IPCDataset(eval_config)
-                dataloader_eval = torch.utils.data.DataLoader(dataset_eval, batch_size=mini_batch_size_per_rank, num_workers = num_workers, shuffle = True)
-                train_loss = estimate_loss(dataloader_eval, model, criterion, autocast_context):
+                # Get the previous segment
+                start_idx_prev, end_idx_prev, seg_size_prev = dataset_train.get_prev_seg()
+
+                # Define a segment that covers all seen training examples
+                dataset_train.set_seg(start_idx = 0, seg_size = end_idx_prev)
+                dataloader_eval = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, num_workers = num_workers, shuffle = True)
+                train_loss = estimate_loss(dataloader_eval, model, criterion, autocast_context, max_iter = max_eval_iter)
+
+                # Restore the previous segment
+                dataset_train.set_seg(start_idx = start_idx_prev, seg_size = seg_size_prev)
 
                 # --- Validation
-                eval_dataset = random.sample(validate_dataset, eval_sample_size)
-                eval_config = IPCDatasetConfig(
-                    full_dataset   = eval_dataset,
-                    transforms     = transforms,
-                    is_perf        = True,
-                    server_address = ('localhost', 5000),
-                )
-                dataset_eval = IPCDataset(eval_config)
-                dataloader_eval = torch.utils.data.DataLoader(dataset_eval, batch_size=mini_batch_size_per_rank, num_workers = num_workers, shuffle = True)
-                train_loss = estimate_loss(dataloader_eval, model, criterion, autocast_context):
+                dataloader_eval = torch.utils.data.DataLoader(dataset_validate, batch_size=batch_size, num_workers = num_workers, shuffle = True)
+                validate_loss = estimate_loss(dataloader_eval, model, criterion, autocast_context, max_iter = max_eval_iter)
+
+                # -- Save checkpoint
+                if validate_loss < loss_min:
+                    loss_min = validate_loss.item() * grad_accum_steps
+
+                    training_state = TrainingStateDictConfig(**dict(
+                        epoch     = epoch,
+                        start_idx = start_idx_prev,
+                        end_idx   = end_idx_prev,
+                        loss_min  = loss_min,
+                    ))
+                    epoch = training_state.epoch
+                    end_idx = training_state.end_idx
+                    dir_chkpt = f"{timestamp}.epoch_{epoch}.end_idx_{end_idx}"
+                    if dir_chkpt_prefix is not None: dir_chkpt = f"{dir_chkpt_prefix}.{dir_chkpt}"
+                    path_chkpt = os.path.join(dir_root_chkpt, dir_chkpt)
+                    checkpointer.save(model, optimizer, scheduler, training_state, path_chkpt)
 
             # -- Update lr after one iteration
             scheduler.step()
 
-        # -- Reset batch
-        mini_batch  = 0
-        micro_batch = 0
+            # [PERFORMANCE]
+            if fsdp_local_rank == 0:
+                memmax.update()
+
+            # [PERFORMANCE]
+            if fsdp_local_rank == 0:
+                memmax.stop()
 
 except KeyboardInterrupt:
     print(f"FSDP RANK {fsdp_rank}: Training was interrupted!")

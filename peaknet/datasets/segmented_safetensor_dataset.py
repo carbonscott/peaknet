@@ -58,13 +58,20 @@ class SegmentedPeakNetDataset(Dataset):
         return None
 
 
-    def set_next_seg(self, start_idx = None):
-        if start_idx is None:
-            start_idx = self.end_idx if self.end_idx < len(self.item_list) else 0
-        end_idx = min(start_idx + self.seg_size, len(self.item_list))
-
+    def set_seg(self, start_idx, seg_size):
         self.start_idx = start_idx
-        self.end_idx   = end_idx
+        self.seg_size  = seg_size
+        self.end_idx   = min(self.start_idx + self.seg_size, len(self.item_list))
+
+
+    def set_next_seg(self):
+        start_idx = self.end_idx if self.end_idx < len(self.item_list) else 0
+        seg_size  = self.seg_size
+        self.set_seg(start_idx, seg_size)
+
+
+    def get_prev_seg(self):
+        return self.start_idx, self.end_idx, self.seg_size
 
 
     def __getitem__(self, idx):

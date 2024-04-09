@@ -283,8 +283,8 @@ def broadcast_dict(obj, src=0, device = 'cpu'):
 @dataclass
 class TrainingStateDictConfig:
     epoch      : int
-    mini_batch : int
-    micro_batch: int
+    start_idx  : int
+    seg_size   : int
     loss_min   : float
 
 
