@@ -86,7 +86,6 @@ fl_chkpt_prefix     = chkpt_config.get("filename_prefix")
 dir_chkpt_prefix    = chkpt_config.get("dir_chkpt_prefix")
 path_chkpt_prev     = chkpt_config.get("path_chkpt_prev")
 chkpt_saving_period = chkpt_config.get("chkpt_saving_period")
-epoch_unstable_end  = chkpt_config.get("epoch_unstable_end")
 
 # -- Dataset
 dataset_config    = config.get("dataset")
@@ -132,8 +131,8 @@ grad_clip    = float(optim_config.get("grad_clip"))
 # -- Scheduler
 lr_scheduler_config = config.get("lr_scheduler")
 patience            = lr_scheduler_config.get("patience")
-warmup_epochs       = lr_scheduler_config.get("warmup_epochs")
-total_epochs        = lr_scheduler_config.get("total_epochs")
+warmup_iterations   = lr_scheduler_config.get("warmup_iterations")
+total_iterations    = lr_scheduler_config.get("total_iterations")
 uses_prev_scheduler = lr_scheduler_config.get("uses_prev")
 min_lr              = float(lr_scheduler_config.get("min_lr"))
 
@@ -376,10 +375,10 @@ param_iter = model.parameters()
 optimizer = optim.AdamW(param_iter,
                         lr = lr,
                         weight_decay = weight_decay)
-scheduler = CosineLRScheduler(optimizer     = optimizer,
-                              warmup_epochs = warmup_epochs,
-                              total_epochs  = total_epochs,
-                              min_lr        = min_lr)
+scheduler = CosineLRScheduler(optimizer         = optimizer,
+                              warmup_iterations = warmup_iterations,
+                              total_iterations  = total_iterations,
+                              min_lr            = min_lr)
 
 
 # ----------------------------------------------------------------------- #

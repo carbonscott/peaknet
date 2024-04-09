@@ -58,6 +58,11 @@ class SegmentedPeakNetDataset(Dataset):
         return None
 
 
+    @property
+    def total_size(self):
+        return len(self.item_list)
+
+
     def set_seg(self, start_idx, seg_size):
         self.start_idx = start_idx
         self.seg_size  = seg_size
