@@ -618,6 +618,9 @@ try:
             if fsdp_local_rank == 0:
                 memmax.stop()
 
+        # Reset the training set for the next epoch
+        dataset_train.set_seg(0, seg_size)
+
         # Close seg pbar
         seg_pbar.close()
 
