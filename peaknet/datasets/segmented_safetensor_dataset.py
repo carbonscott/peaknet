@@ -12,6 +12,8 @@ import warnings
 from dataclasses import dataclass
 from typing import Optional, List
 
+from math import floor
+
 from collections import OrderedDict
 
 from ..perf import Timer
@@ -63,6 +65,12 @@ class SegmentedPeakNetDataset(Dataset):
         return len(self.item_list)
 
 
+    @property
+    def num_remaining_seg(self):
+        num_remaining_items = len(self.item_list) - self.end_idx
+        return floor(num_remaining_items / self.seg_size)
+
+
     def set_seg(self, start_idx, seg_size):
         self.start_idx = start_idx
         self.seg_size  = seg_size
@@ -89,11 +97,11 @@ class SegmentedPeakNetDataset(Dataset):
         if file_path not in self.data_buffer:
             if len(self.data_buffer) == self.buffer_size:
                 file_path_oldest, data_oldest = self.data_buffer.popitem(last=False)
-                print(f"{file_path_oldest} is cleared.")
+                ## print(f"{file_path_oldest} is cleared.")
             self.data_buffer[file_path] = load_file(file_path, device = 'cpu')
-            print(f"{file_path} is loaded.")
+            ## print(f"{file_path} is loaded.")
 
-        print(f'Global index: {global_idx}; Local index: {idx}; Start index: {self.start_idx};')
+        ## print(f'Global index: {global_idx}; Local index: {idx}; Start index: {self.start_idx};')
 
         # Retrieve specific image and label tensors
         data = self.data_buffer[file_path]
