@@ -11,6 +11,7 @@ import logging
 
 from functools import partial
 from contextlib import nullcontext
+from datetime import timedelta
 
 # -- PeakNet specific imports
 from peaknet.datasets.segmented_safetensor_dataset import SegmentedPeakNetDataset
@@ -82,7 +83,6 @@ with open(fl_yaml, 'r') as fh:
 # -- Checkpoint
 chkpt_config        = config.get("checkpoint")
 dir_root_chkpt      = chkpt_config.get("directory")
-path_pretrain_chkpt = chkpt_config.get("pretrain")
 fl_chkpt_prefix     = chkpt_config.get("filename_prefix")
 dir_chkpt_prefix    = chkpt_config.get("dir_chkpt_prefix")
 path_chkpt_prev     = chkpt_config.get("path_chkpt_prev")
@@ -181,6 +181,7 @@ if uses_fsdp:
     dist.init_process_group(backend     = fsdp_backend,
                             rank        = fsdp_rank,
                             world_size  = fsdp_world_size,
+                            timeout     = timedelta(seconds=900),
                             init_method = "env://",)
     print(f"RANK:{fsdp_rank},LOCAL_RANK:{fsdp_local_rank},WORLD_SIZE:{fsdp_world_size}")
 else:
@@ -250,6 +251,7 @@ timestamp = broadcast_dict(dict(timestamp=timestamp), src = 0, device = device).
 # ----------------------------------------------------------------------- #
 #  DATASET
 # ----------------------------------------------------------------------- #
+print(f'[RANK {fsdp_rank}] Confguring dataset...')
 # -- Seeding
 base_seed   = 0
 world_seed  = base_seed + seed_offset
@@ -278,6 +280,7 @@ dataset_validate = SegmentedPeakNetDataset(path_csv      = path_validate_csv,
 # ----------------------------------------------------------------------- #
 #  MODEL
 # ----------------------------------------------------------------------- #
+print(f'[RANK {fsdp_rank}] Confguring model...')
 # -- Config the model
 # --- Backbone
 backbone_config = ConvNextV2BackboneConfig(**backbone_params)
@@ -367,6 +370,7 @@ if fsdp_rank == 0:
 # ----------------------------------------------------------------------- #
 #  CRITERION (LOSS)
 # ----------------------------------------------------------------------- #
+print(f'[RANK {fsdp_rank}] Confguring criterion...')
 criterion = CategoricalFocalLoss(alpha       = focal_alpha,
                                  gamma       = focal_gamma,
                                  num_classes = seghead_num_classes,)
@@ -375,6 +379,7 @@ criterion = CategoricalFocalLoss(alpha       = focal_alpha,
 # ----------------------------------------------------------------------- #
 #  Optimizer
 # ----------------------------------------------------------------------- #
+print(f'[RANK {fsdp_rank}] Confguring optimizer...')
 param_iter = model.parameters()
 optimizer = optim.AdamW(param_iter,
                         lr = lr,
@@ -388,6 +393,7 @@ scheduler = CosineLRScheduler(optimizer         = optimizer,
 # ----------------------------------------------------------------------- #
 #  CHECKPOINT (SHARDED STATE DICT)
 # ----------------------------------------------------------------------- #
+print(f'[RANK {fsdp_rank}] Confguring optimizer...')
 # -- Set init training state dict
 loss_min = float('inf')
 training_state_dict_config = TrainingStateDictConfig(
@@ -486,6 +492,7 @@ def is_last_batch(batch_idx, num_batches):
 # ----------------------------------------------------------------------- #
 #  TRAINING LOOP
 # ----------------------------------------------------------------------- #
+print(f'[RANK {fsdp_rank}] Ready for training loop...')
 try:
     # -- Train one epoch
     for epoch in tqdm.tqdm(range(max_epochs), desc = f'[RANK {fsdp_rank}] Epoch'):
