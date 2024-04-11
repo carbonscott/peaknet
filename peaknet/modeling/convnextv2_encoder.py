@@ -64,7 +64,9 @@ class ConvNextV2Backbone(nn.Module):
         model = timm.create_model(model_name, pretrained = downloads_weights)
         if path_pretrain_chkpt is not None:
             pretrain_chkpt = torch.load(path_pretrain_chkpt)
+            print(f"-- Loading weights from {path_pretrain_chkpt}...")
             model.load_state_dict(pretrain_chkpt, strict = False)
+            print(f"-- Done loading weights.")
 
         out_channels = model.stem[0].out_channels
         kernel_size  = model.stem[0].kernel_size
