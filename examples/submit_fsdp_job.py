@@ -11,56 +11,59 @@ import argparse
 import subprocess
 
 parser = argparse.ArgumentParser(description="Generate experiment scripts from templates.")
-parser.add_argument("--job_basename"    , type = str, help = "Value for job name.")
-parser.add_argument("--path_train"      , type = str, help = "Path to the dataset csv (train).")
-parser.add_argument("--path_validate"   , type = str, help = "Path to the dataset csv (validate).")
-parser.add_argument("--model_name"      , type = str, help = "Name of the backbone")
-parser.add_argument("--num_nodes"       , type = int, help = "Number of computer nodes.")
-parser.add_argument("--num_gpus"        , type = int, help = "Number of GPUs.")
-parser.add_argument("--num_workers"     , type = int, help = "Number of workers to load data.")
-parser.add_argument("--batch_size"      , type = int, help = "Batch size.")
-parser.add_argument("--seg_size"        , type = int, help = "Seg size.")
-parser.add_argument("--grad_accum_steps", type = int, help = "Grad accum steps.")
-parser.add_argument("--max_eval_iter"   , type = int, help = "Max eval iteration number.")
-parser.add_argument("--fsdp_dtype"      , type = str, help = "FSDP data type (float16, bfloat16, float32).")
-parser.add_argument("--trainer"         , type = str, help = "The training script.")
+parser.add_argument("--job_basename"       , type = str, help = "Value for job name.")
+parser.add_argument("--path_train"         , type = str, help = "Path to the dataset csv (train).")
+parser.add_argument("--path_validate"      , type = str, help = "Path to the dataset csv (validate).")
+parser.add_argument("--model_name"         , type = str, help = "Name of the backbone")
+parser.add_argument("--num_nodes"          , type = int, help = "Number of computer nodes.")
+parser.add_argument("--num_gpus"           , type = int, help = "Number of GPUs.")
+parser.add_argument("--num_workers"        , type = int, help = "Number of workers to load data.")
+parser.add_argument("--batch_size"         , type = int, help = "Batch size.")
+parser.add_argument("--seg_size"           , type = int, help = "Seg size.")
+parser.add_argument("--grad_accum_steps"   , type = int, help = "Grad accum steps.")
+parser.add_argument("--max_eval_iter"      , type = int, help = "Max eval iteration number.")
+parser.add_argument("--path_pretrain_chkpt", type = str, help = "Path to the pretrained model weights")
+parser.add_argument("--fsdp_dtype"         , type = str, help = "FSDP data type (float16, bfloat16, float32).")
+parser.add_argument("--trainer"            , type = str, help = "The training script.")
 args = parser.parse_args()
 
-job_basename     = args.job_basename
-path_train       = args.path_train
-path_validate    = args.path_validate
-model_name       = args.model_name
-num_nodes        = args.num_nodes
-num_gpus         = args.num_gpus
-num_workers      = args.num_workers
-batch_size       = args.batch_size
-seg_size         = args.seg_size
-grad_accum_steps = args.grad_accum_steps
-max_eval_iter    = args.max_eval_iter
-fsdp_dtype       = args.fsdp_dtype
-trainer          = args.trainer
+job_basename        = args.job_basename
+path_train          = args.path_train
+path_validate       = args.path_validate
+model_name          = args.model_name
+num_nodes           = args.num_nodes
+num_gpus            = args.num_gpus
+num_workers         = args.num_workers
+batch_size          = args.batch_size
+seg_size            = args.seg_size
+grad_accum_steps    = args.grad_accum_steps
+max_eval_iter       = args.max_eval_iter
+path_pretrain_chkpt = args.path_pretrain_chkpt
+fsdp_dtype          = args.fsdp_dtype
+trainer             = args.trainer
 
 cpu_per_task = (num_workers * num_gpus) + 2
 
 # Set up the environment and the loader
 env = Environment(loader=FileSystemLoader('.'))
 drc_template = 'template'
-bash_template = env.get_template(os.path.join(drc_template, 'slurm.fsdp.s3df.sh' if num_nodes > 1 else 'slurm.single_node.s3df.sh'))
+bash_template = env.get_template(os.path.join(drc_template, 'lsf.fsdp.summit.sh' if num_nodes > 1 else 'slurm.single_node.s3df.sh'))
 yaml_template = env.get_template(os.path.join(drc_template, 'config_fsdp.yaml'))
 
 # Render the yaml script
-yaml_content = yaml_template.render(filename_prefix  = job_basename,
-                                    path_train       = path_train,
-                                    path_validate    = path_validate,
-                                    model_name       = model_name,
-                                    num_nodes        = num_nodes,
-                                    num_gpus         = num_gpus,
-                                    batch_size       = batch_size,
-                                    seg_size         = seg_size,
-                                    grad_accum_steps = grad_accum_steps,
-                                    max_eval_iter    = max_eval_iter,
-                                    fsdp_dtype       = fsdp_dtype,
-                                    num_workers      = num_workers,)
+yaml_content = yaml_template.render(filename_prefix     = job_basename,
+                                    path_train          = path_train,
+                                    path_validate       = path_validate,
+                                    model_name          = model_name,
+                                    num_nodes           = num_nodes,
+                                    num_gpus            = num_gpus,
+                                    batch_size          = batch_size,
+                                    seg_size            = seg_size,
+                                    grad_accum_steps    = grad_accum_steps,
+                                    max_eval_iter       = max_eval_iter,
+                                    path_pretrain_chkpt = path_pretrain_chkpt,
+                                    fsdp_dtype          = fsdp_dtype,
+                                    num_workers         = num_workers,)
 
 config_dict = yaml.safe_load(yaml_content)
 
@@ -107,18 +110,19 @@ for enum_idx, num_bifpn_block in enumerate(scan_range):
     job_name = f"{job_basename}.{enum_idx:02d}"
 
     # Write to a YAML file...
-    yaml_content = yaml_template.render(filename_prefix  = job_basename,
-                                        path_train       = path_train,
-                                        path_validate    = path_validate,
-                                        model_name       = model_name,
-                                        num_nodes        = num_nodes,
-                                        num_gpus         = num_gpus,
-                                        batch_size       = batch_size,
-                                        seg_size         = seg_size,
-                                        grad_accum_steps = grad_accum_steps,
-                                        max_eval_iter    = max_eval_iter,
-                                        fsdp_dtype       = fsdp_dtype,
-                                        num_workers      = num_workers,)
+    yaml_content = yaml_template.render(filename_prefix     = job_basename,
+                                        path_train          = path_train,
+                                        path_validate       = path_validate,
+                                        model_name          = model_name,
+                                        num_nodes           = num_nodes,
+                                        num_gpus            = num_gpus,
+                                        batch_size          = batch_size,
+                                        seg_size            = seg_size,
+                                        grad_accum_steps    = grad_accum_steps,
+                                        max_eval_iter       = max_eval_iter,
+                                        path_pretrain_chkpt = path_pretrain_chkpt,
+                                        fsdp_dtype          = fsdp_dtype,
+                                        num_workers         = num_workers,)
 
     fl_output_yaml = f"{job_name}.yaml"
     path_output_yaml = os.path.join(drc_yaml, fl_output_yaml)
