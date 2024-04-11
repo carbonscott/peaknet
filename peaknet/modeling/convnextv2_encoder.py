@@ -5,14 +5,15 @@ import timm
 
 from dataclasses import dataclass, field
 
-from typing import Dict
+from typing import Optional
 
 
 @dataclass
 class ConvNextV2BackboneConfig:
-    in_channels    : int  = 1
-    model_name     : str  = 'convnextv2_atto.fcmae'
-    uses_pretrained: bool = True
+    in_channels         : int  = 1
+    model_name          : str  = 'convnextv2_atto.fcmae'
+    downloads_weights   : bool = True
+    path_pretrain_chkpt : Optional[str] = None
 
 
 class ConvNextV2Backbone(nn.Module):
@@ -54,12 +55,16 @@ class ConvNextV2Backbone(nn.Module):
     def __init__(self, config = None):
         super().__init__()
 
-        self.config     = ConvNextV2Backbone.get_default_config() if config is None else config
-        in_channels     = self.config.in_channels
-        model_name      = self.config.model_name
-        uses_pretrained = self.config.uses_pretrained
+        self.config         = ConvNextV2Backbone.get_default_config() if config is None else config
+        in_channels         = self.config.in_channels
+        model_name          = self.config.model_name
+        downloads_weights   = self.config.downloads_weights
+        path_pretrain_chkpt = self.config.path_pretrain_chkpt
 
-        model = timm.create_model(model_name, pretrained = uses_pretrained)
+        model = timm.create_model(model_name, pretrained = downloads_weights)
+        if path_pretrain_chkpt is not None:
+            pretrain_chkpt = torch.load(path_pretrain_chkpt)
+            model.load_state_dict(pretrain_chkpt, strict = False)
 
         out_channels = model.stem[0].out_channels
         kernel_size  = model.stem[0].kernel_size
