@@ -98,7 +98,7 @@ class PeakNet(nn.Module):
         """
         rank = int(os.environ.get("RANK", 0))
 
-        cache_dir  = os.environ.get("HOME", os.getcwd())
+        cache_dir  = os.getcwd()
         cache_dir  = os.path.join(cache_dir, '.cache/peaknet')
         cache_file = os.path.join(cache_dir, f'output_channels.{model_name}.pt')
 
