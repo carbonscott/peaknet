@@ -89,28 +89,57 @@ class PeakNet(nn.Module):
 
     @staticmethod
     def estimate_output_channels(model_name):
-        local_rank = os.environ.get("LOCAL_RANK", 0)
-        device = f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu'
+        """ Estimate the output channels for an input backbone.
 
-        B, C, H, W = 2, 1, 1*(2**4)*4, 1*(2**4)*4
-        batch_input = torch.rand(B, C, H, W, dtype = torch.float, device = device)
+            Only rank 0 will perform the calculation.
 
-        config = ConvNextV2BackboneConfig()
-        config.model_name = model_name
+            The output will be saved under the home directory.
+        """
+        rank = os.environ.get("RANK", 0)
 
-        model = ConvNextV2Backbone(config)
-        model.to(device)
-        model.eval()
-        with torch.no_grad():
-            stage_feature_maps = model(batch_input)
+        cache_dir  = os.environ.get("HOME", os.getcwd())
+        cache_dir  = os.path.join(cache_dir, '.cache/peaknet')
+        cache_file = os.path.join(cache_dir, f'output_channels.{model_name}.pt')
 
-        # Explicitly delete the model and input tensor
-        del model
-        del batch_input
-        if device != 'cpu':
-            torch.cuda.empty_cache()
+        if rank == 0:
+            print(f"[RANK {rank}] Creating cache for building the model...")
+            os.makedirs(cache_dir, exist_ok=True)
 
-        return { f"stage{enum_idx}" : stage_feature_map.shape[1] for enum_idx, stage_feature_map in enumerate(stage_feature_maps) }    # (B, C, H, W)
+            device = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
+
+            B, C, H, W = 2, 1, 1*(2**4)*4, 1*(2**4)*4
+            batch_input = torch.rand(B, C, H, W, dtype = torch.float, device = device)
+
+            config = ConvNextV2BackboneConfig()
+            config.model_name = model_name
+
+            model = ConvNextV2Backbone(config)
+            model.to(device)
+            model.eval()
+            with torch.no_grad():
+                stage_feature_maps = model(batch_input)
+            model.train()
+
+            # Explicitly delete the model and input tensor
+            del model
+            del batch_input
+            if device != 'cpu':
+                torch.cuda.empty_cache()
+
+            output_channels = { f"stage{enum_idx}" : stage_feature_map.shape[1] for enum_idx, stage_feature_map in enumerate(stage_feature_maps) }    # (B, C, H, W)
+
+            torch.save(output_channels, cache_file)
+        else:
+            print(f"[RANK {rank}] Waiting...")
+
+        if dist.is_initialized():
+            dist.barrier()
+
+        if os.path.exists(cache_file):
+            print(f"[RANK {rank}] Loading the model building cache...")
+            return torch.load(cache_file, map_location='cpu')    # CPU is fine for loading python dict
+
+        raise RuntimeError(f"Cache file '{cache_file}' not found. This should not happen after synchronization barrier.")
 
 
     def __init__(self, config = None):
