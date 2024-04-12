@@ -96,42 +96,43 @@ class PeakNet(nn.Module):
 
             The output will be saved under the home directory.
         """
-        rank = os.environ.get("RANK", 0)
+        rank = int(os.environ.get("RANK", 0))
 
         cache_dir  = os.environ.get("HOME", os.getcwd())
         cache_dir  = os.path.join(cache_dir, '.cache/peaknet')
         cache_file = os.path.join(cache_dir, f'output_channels.{model_name}.pt')
 
-        if rank == 0:
-            print(f"[RANK {rank}] Creating cache for building the model...")
-            os.makedirs(cache_dir, exist_ok=True)
+        if not os.path.exists(cache_file):
+            if rank == 0:
+                print(f"[RANK {rank}] Creating cache for building the model...")
+                os.makedirs(cache_dir, exist_ok=True)
 
-            device = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
+                device = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
 
-            B, C, H, W = 2, 1, 1*(2**4)*4, 1*(2**4)*4
-            batch_input = torch.rand(B, C, H, W, dtype = torch.float, device = device)
+                B, C, H, W = 2, 1, 1*(2**4)*4, 1*(2**4)*4
+                batch_input = torch.rand(B, C, H, W, dtype = torch.float, device = device)
 
-            config = ConvNextV2BackboneConfig()
-            config.model_name = model_name
+                config = ConvNextV2BackboneConfig()
+                config.model_name = model_name
 
-            model = ConvNextV2Backbone(config)
-            model.to(device)
-            model.eval()
-            with torch.no_grad():
-                stage_feature_maps = model(batch_input)
-            model.train()
+                model = ConvNextV2Backbone(config)
+                model.to(device)
+                model.eval()
+                with torch.no_grad():
+                    stage_feature_maps = model(batch_input)
+                model.train()
 
-            # Explicitly delete the model and input tensor
-            del model
-            del batch_input
-            if device != 'cpu':
-                torch.cuda.empty_cache()
+                # Explicitly delete the model and input tensor
+                del model
+                del batch_input
+                if device != 'cpu':
+                    torch.cuda.empty_cache()
 
-            output_channels = { f"stage{enum_idx}" : stage_feature_map.shape[1] for enum_idx, stage_feature_map in enumerate(stage_feature_maps) }    # (B, C, H, W)
+                output_channels = { f"stage{enum_idx}" : stage_feature_map.shape[1] for enum_idx, stage_feature_map in enumerate(stage_feature_maps) }    # (B, C, H, W)
 
-            torch.save(output_channels, cache_file)
-        else:
-            print(f"[RANK {rank}] Waiting...")
+                torch.save(output_channels, cache_file)
+            else:
+                print(f"[RANK {rank}] Waiting...")
 
         if dist.is_initialized():
             dist.barrier()
