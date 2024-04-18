@@ -7,6 +7,8 @@ from torchvision.transforms.functional import rotate
 
 import random
 
+from math import ceil
+
 '''
 Batch augmentation.
 
@@ -176,3 +178,49 @@ class RandomShift:
             print(f"y-shift = {y_shift}, x-shift = {x_shift}")
 
         return crop
+
+
+class Patchify:
+    """
+    Examples:
+        >>> patch_size = 244
+        >>> stride = 244
+        >>> patchifier = Patchify(patch_size, stride)
+        >>> patches = patchifier(imgs)
+        >>> print(patches.shape)
+    """
+    def __init__(self, patch_size, stride):
+        self.patch_size = patch_size
+        self.stride     = stride
+
+    def __call__(self, batch_img):
+        """
+        Arguments:
+            img: (B, C, H, W)
+        """
+        patch_size = self.patch_size
+        stride     = self.stride
+
+        B, C, H, W = batch_img.shape
+
+        H_padded, W_padded = patch_size * ceil(H / patch_size), patch_size * ceil(W / patch_size)
+
+        padder = Pad(H_padded, W_padded)
+        batch_img_padded = padder(batch_img)
+
+        # (B, C, H, W) -> (B, C * patch_size * patch_size, num_patches)
+        batch_patches = F.unfold(
+            batch_img_padded,
+            kernel_size = (patch_size, patch_size),
+            stride=stride
+        )
+
+        # (B, C * patch_size * patch_size, num_patches) - > (B, C, patch_size, patch_size, num_patches)
+        batch_patches = batch_patches.view(
+            B, C, patch_size, patch_size, -1
+        )
+
+        # (B, C, patch_size, patch_size, num_patches) -> (B, num_patches, C, patch_size, patch_size)
+        batch_patches = batch_patches.permute(0, 4, 1, 2, 3).contiguous()
+
+        return batch_patches
