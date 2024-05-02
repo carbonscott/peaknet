@@ -473,7 +473,7 @@ def estimate_loss(dataloader, model, criterion, autocast_context, max_iter = Non
         num_samples[enum_idx] = len(batch_input)
 
     losses_sum      = torch.dot(losses, num_samples)
-    num_samples_sum = losses_sum.sum()
+    num_samples_sum = num_samples.sum()
 
     world_losses_sum      = [ torch.tensor(0.0).to(device) for _ in range(fsdp_world_size) ]
     world_num_samples_sum = [ torch.tensor(0.0).to(device) for _ in range(fsdp_world_size) ]
