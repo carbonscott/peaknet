@@ -12,9 +12,9 @@ dataset:
   subset_size    : 100
   ## server_address : [localhost, 5000]
   transforms:
-    H_pad: 512
-    W_pad: 512
-    num_patch: 250
+    H_pad: 2048
+    W_pad: 2048
+    num_patch: 100
     size_patch: 20
     angle_max: 360
     frac_shift_max: 0.1
