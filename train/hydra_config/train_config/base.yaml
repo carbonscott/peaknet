@@ -37,6 +37,7 @@ lr_scheduler:
   total_iterations : !!int 1_000_000
   uses_prev        : true
   warmup_iterations: 5
+  scheduler_step_period: 200
 misc:
   max_epochs          : 5
   max_eval_iter       : 50
