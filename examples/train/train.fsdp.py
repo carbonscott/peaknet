@@ -98,21 +98,6 @@ fl_yaml = args.yaml_file
 with open(fl_yaml, 'r') as fh:
     config = yaml.safe_load(fh)
 
-
-
-## train.fsdp.py:334:46: F821 undefined name 'backbone_params'
-## train.fsdp.py:337:1: F821 undefined name 'bifpn_block_params'
-## train.fsdp.py:337:51: F821 undefined name 'bifpn_block_bn_params'
-## train.fsdp.py:338:1: F821 undefined name 'bifpn_block_params'
-## train.fsdp.py:338:51: F821 undefined name 'bifpn_block_fusion_params'
-## train.fsdp.py:339:1: F821 undefined name 'bifpn_params'
-## train.fsdp.py:339:51: F821 undefined name 'bifpn_block_params'
-## train.fsdp.py:340:51: F821 undefined name 'bifpn_params'
-## train.fsdp.py:343:34: F821 undefined name 'seghead_params'
-## train.fsdp.py:552:20: F821 undefined name 'criterion'
-## train.fsdp.py:635:13: F821 undefined name 'sampler'
-## train.fsdp.py:663:32: F821 undefined name 'criterion'
-
 # -- Checkpoint
 chkpt_config        = config.get("checkpoint")
 dir_root_chkpt      = chkpt_config.get("directory")
