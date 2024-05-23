@@ -16,10 +16,10 @@ class PeakNetDataset(Dataset):
     The data distribution should be handled externally (like how you construct
     the csv).
     """
-    def __init__(self, path_csv, trans_list = None, cache_size = 10, perfs_runtime = False):
+    def __init__(self, path_csv, transforms = None, cache_size = 10, perfs_runtime = False):
         super().__init__()
 
-        self.trans_list    = trans_list
+        self.transforms    = transforms
         self.cache_size    = cache_size
         self.perfs_runtime = perfs_runtime
 
@@ -38,6 +38,9 @@ class PeakNetDataset(Dataset):
                 for item_idx in range(num_items):
                     self.file_index_map.append((file_idx, item_idx))
 
+        # Create an item index for sub sampling
+        self.reset_sample_idx_map()
+
         self.cache = {}
         self.cache_order = deque([], maxlen=cache_size)
 
@@ -45,7 +48,8 @@ class PeakNetDataset(Dataset):
 
 
     def get_img(self, idx):
-        file_idx, item_idx = self.file_index_map[idx]
+        sample_idx = self.sample_idx_map[idx]
+        file_idx, item_idx = self.file_index_map[sample_idx]
         file_path = self.file_paths[file_idx]
 
         # Load file into cache if not already present
@@ -64,9 +68,9 @@ class PeakNetDataset(Dataset):
         img, label = self.get_img(idx)    # (C, H, W)
 
         # Apply transformation to image and label at the same time...
-        if self.trans_list is not None:
+        if self.transforms is not None:
             data = torch.cat([img[None,], label[None,]], dim = 0)    # (2*B=1, C, H, W)
-            for enum_idx, trans in enumerate(self.trans_list):
+            for enum_idx, trans in enumerate(self.transforms):
                 with Timer(tag = f"Transform method {enum_idx:d}", is_on = self.perfs_runtime):
                     data = trans(data)
 
@@ -91,4 +95,15 @@ class PeakNetDataset(Dataset):
 
 
     def __len__(self):
-        return len(self.file_index_map)
+        return len(self.sample_idx_map)
+
+
+    def reset_sample_idx_map(self):
+        self.sample_idx_map = range(len(self.file_index_map))
+
+
+    def sample_subset(self, subset_start_idx, subset_size):
+        subset_start_idx = max(subset_start_idx, 0)
+        subset_end_idx   = min(subset_start_idx + subset_size, len(self.file_index_map))
+
+        self.sample_idx_map = range(subset_start_idx, subset_end_idx)
