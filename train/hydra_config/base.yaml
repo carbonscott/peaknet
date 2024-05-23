@@ -1,0 +1,19 @@
+defaults:
+  - _self_
+  - bsub_config : base
+  - train_config: base
+
+auto_submit: false
+job: my_job
+
+path:
+  dir_bsub_template  : 'hydra_config/bsub_config'
+  file_bsub_template : 'template.bsub'
+  dir_bsub_jobs      : 'experiments/bsub'
+  dir_yaml_jobs      : 'experiments/yaml'
+  file_bsub_job      : 'base.bsub'
+  file_yaml_job      : 'base.yaml'
+
+hydra:
+  run:
+    dir: 'experiments/hydra/'

@@ -1,0 +1,14 @@
+qos                : "batch"
+walltime           : "12:00"
+job                : "job_name"
+num_nodes          : 100
+## num_cpus_for_server: 6
+## num_cpus_for_client: 4
+## num_gpus_for_client: 6
+num_cpus           : 8
+num_gpus           : 6
+trainer            : 'train.fsdp.py'
+yaml_config        : 'base.yaml'
+## ipc_workers        : 2
+OMP_NUM_THREADS    : 1
+transformers_cache : ''

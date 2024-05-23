@@ -1,0 +1,81 @@
+checkpoint:
+  chkpt_saving_period: 1
+  directory          : experiments/chkpts
+  filename_prefix    : fsdp
+  path_chkpt_prev    : null
+  pretrain           : null
+dataset:
+  batch_size     : 2
+  num_workers    : 2
+  path_train     : experiments/datasets/safetensor_dataset.train.csv
+  path_eval      : experiments/datasets/safetensor_dataset.validate.csv
+  subset_size    : 100
+  ## server_address : [localhost, 5000]
+  transforms:
+    H_pad: 512
+    W_pad: 512
+    num_patch: 250
+    size_patch: 20
+    angle_max: 360
+    frac_shift_max: 0.1
+    downscale_factors: [2, 2]
+    var_size_patch: 0.2
+dist:
+  backend               : nccl
+  uses_unique_world_seed: true
+  dtype                 : float16
+logging:
+  directory      : experiments/logs
+  filename_prefix: fsdp
+loss:
+  focal:
+    alpha: 1.0
+    gamma: 2.0
+  grad_accum_steps: 10
+lr_scheduler:
+  min_lr           : !!float 1e-7
+  total_iterations : !!int 1_000_000
+  uses_prev        : true
+  warmup_iterations: 5
+misc:
+  max_epochs          : 5
+  max_eval_iter       : 50
+  num_gpus            : 4
+  compiles_model      : false
+  data_dump_on        : false
+model:
+  backbone:
+    in_channels: 1
+    model_name: convnextv2_atto.fcmae
+    uses_pretrained: true
+  bifpn:
+    block:
+      base_level: 4
+      bn:
+        eps: !!float 1.0e-05
+        momentum: 0.1
+      down_scale_factor: 0.5
+      fusion:
+        eps: !!float 1.0e-05
+      num_features: 256
+      num_levels: 4
+      relu_inplace: false
+      up_scale_factor: 2
+    num_blocks: 1
+  freezes_backbone: false
+  seg_head:
+    base_scale_factor: 2
+    num_classes: 2
+    num_groups: 32
+    out_channels: 256
+    up_scale_factor:
+    - 4
+    - 8
+    - 16
+    - 32
+    uses_learned_upsample: false
+  uses_random_weights: false
+optim:
+  grad_clip   : 1.0
+  lr          : !!float 2e-4
+  weight_decay: !!float 1e-4
