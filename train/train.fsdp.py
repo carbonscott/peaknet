@@ -491,9 +491,9 @@ if from_resume:
         checkpointer.post_fsdp_load(model, optimizer, scheduler, training_state)
 
         # Training state
-        training_state          = checkpointer.config.training_state
-        last_epoch              = training_state.epoch
-        dataset_train.end_idx   = training_state.end_idx
+        training_state = checkpointer.config.training_state
+        last_epoch     = training_state.epoch
+        loss_min       = training_state.loss_min
 
         logger.info(f"PREV - last_epoch {last_epoch}, loss_min = {loss_min}")
 
