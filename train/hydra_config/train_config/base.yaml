@@ -47,7 +47,8 @@ model:
   backbone:
     in_channels: 1
     model_name: convnextv2_atto.fcmae
-    uses_pretrained: true
+    downloads_weights : true
+    path_pretrain_chkpt : null
   bifpn:
     block:
       base_level: 4
