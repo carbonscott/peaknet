@@ -75,7 +75,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 import torch.distributed as dist
 
 # -- Debug
-torch.autograd.set_detect_anomaly(True)    # [WARNING] Making it True may throw errors when using bfloat16
+torch.autograd.set_detect_anomaly(False)    # [WARNING] Making it True may throw errors when using float16
 
 # -- Reporting specific imports
 import colorama
@@ -101,8 +101,7 @@ with open(fl_yaml, 'r') as fh:
 # -- Checkpoint
 chkpt_config        = config.get("checkpoint")
 dir_root_chkpt      = chkpt_config.get("directory")
-fl_chkpt_prefix     = chkpt_config.get("filename_prefix")
-dir_chkpt_prefix    = chkpt_config.get("dir_chkpt_prefix")
+chkpt_prefix        = chkpt_config.get("prefix")
 path_chkpt_prev     = chkpt_config.get("path_chkpt_prev")
 chkpt_saving_period = chkpt_config.get("chkpt_saving_period")
 
@@ -167,7 +166,7 @@ dist_dtype             = dist_config.get("dtype")
 # -- Logging
 logging_config = config.get("logging")
 drc_log       = logging_config.get("directory")
-fl_log_prefix = logging_config.get("filename_prefix")
+fl_log_prefix = logging_config.get("prefix")
 
 # -- Misc
 misc_config = config.get("misc")
@@ -779,7 +778,7 @@ try:
                 training_state.loss_min  = loss_min
 
                 dir_chkpt = f"{timestamp}.epoch_{epoch}"
-                if dir_chkpt_prefix is not None: dir_chkpt = f"{dir_chkpt_prefix}.{dir_chkpt}"
+                if chkpt_prefix is not None: dir_chkpt = f"{chkpt_prefix}.{dir_chkpt}"
                 path_chkpt = os.path.join(dir_root_chkpt, dir_chkpt)
                 checkpointer.save(model, optimizer, scheduler, training_state, path_chkpt)
 

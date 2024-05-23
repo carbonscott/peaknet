@@ -1,7 +1,7 @@
 checkpoint:
   chkpt_saving_period: 1
   directory          : experiments/chkpts
-  filename_prefix    : fsdp
+  prefix             : fsdp
   path_chkpt_prev    : null
   pretrain           : null
 dataset:
@@ -25,8 +25,8 @@ dist:
   uses_unique_world_seed: true
   dtype                 : float16
 logging:
-  directory      : experiments/logs
-  filename_prefix: fsdp
+  directory : experiments/logs
+  prefix    : fsdp
 loss:
   focal:
     alpha: 1.0
