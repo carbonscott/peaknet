@@ -62,9 +62,14 @@ from typing import Optional
 # -- Rest
 import pickle
 import os
+from datetime import datetime
 
 # -- Patch PyTorch
 from .patches.build_metadata import patch_build_metadata
+
+# -- Logging
+import logging
+logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------- #
 #  MEMORY TOOL
@@ -289,8 +294,11 @@ def broadcast_dict(obj, src=0, device = 'cpu'):
 # ----------------------------------------------------------------------- #
 @dataclass
 class TrainingStateDictConfig:
-    epoch   : int
-    loss_min: float
+    epoch      : int
+    seg        : int
+    start_idx  : int
+    end_idx    : int
+    loss_min   : float
 
 
 # -- 1. FULL STATE DICT
@@ -475,7 +483,8 @@ class FullStateDictCheckpoint:
 
 
     def save(self, model, optimizer, lr_scheduler, training_state, path_checkpoint):
-        dist.barrier()    # Make sure all shards are at the same timepoint in training.
+        if dist.is_initialized():
+            dist.barrier()    # Make sure all shards are at the same timepoint in training.
 
         self.update_config(model, optimizer, lr_scheduler, training_state, path_checkpoint)
 
@@ -496,7 +505,8 @@ class FullStateDictCheckpoint:
             }
             torch.save(full_state_dict, path_checkpoint)
 
-        dist.barrier()
+        if dist.is_initialized():
+            dist.barrier()
 
 
     def update_config(self, model = None, optimizer = None, lr_scheduler = None, training_state = None, path_checkpoint = None):
@@ -526,7 +536,8 @@ class FullStateDictCheckpoint:
         Only the model needs to be loaded pre FSDP wrapper.
         """
         self._load_model_full_state_dict()
-        dist.barrier()    # Make sure all shards are at the same timepoint in training.
+        if dist.is_initialized():
+            dist.barrier()    # Make sure all shards are at the same timepoint in training.
 
 
     def post_fsdp_load(self, model, optimizer, lr_scheduler, training_state):
@@ -541,7 +552,9 @@ class FullStateDictCheckpoint:
         self._load_optim_full_state_dict()
         self._load_training_state_dict()
         self._load_lr_scheduler_state_dict()
-        dist.barrier()    # Make sure all shards are at the same timepoint in training.
+
+        if dist.is_initialized():
+            dist.barrier()    # Make sure all shards are at the same timepoint in training.
 
 
 # -- 2. SHARDED STATE DICT
@@ -788,11 +801,13 @@ class ShardedStateDictCheckpoint:
             self.config.path_checkpoint = path_checkpoint
             print(f"RANK {self.config.rank} - Checkpoint path loaded.")
 
-        dist.barrier()
+        if dist.is_initialized():
+            dist.barrier()
 
 
     def save(self, model, optimizer, lr_scheduler, training_state, path_checkpoint):
-        dist.barrier()
+        if dist.is_initialized():
+            dist.barrier()
 
         self.update_config(model, optimizer, lr_scheduler, training_state, path_checkpoint)
 
@@ -813,7 +828,8 @@ class ShardedStateDictCheckpoint:
             }
             torch.save(full_state_dict, path_scheduler_and_training_checkpoint)
 
-        dist.barrier()
+        if dist.is_initialized():
+            dist.barrier()
 
 
     def load(self):
@@ -824,4 +840,46 @@ class ShardedStateDictCheckpoint:
         self._load_training_state_dict()
         self._load_lr_scheduler_state_dict()
 
-        dist.barrier()
+        if dist.is_initialized():
+            dist.barrier()
+
+
+# ----------------------------------------------------------------------- #
+#  Logger
+# ----------------------------------------------------------------------- #
+def init_logger(uses_dist, dist_rank, device, fl_prefix = None, drc_log = "logs", level = 'info'):
+    timestamp = None
+
+    if dist_rank == 0:
+        # Create a timestamp to name the log file...
+        now = datetime.now()
+        timestamp = now.strftime("%Y_%m%d_%H%M_%S")
+
+    if uses_dist:
+        timestamp = broadcast_dict(dict(timestamp=timestamp), src = 0, device = device).get('timestamp')
+
+    # Set up the log file...
+    # ...base directory
+    base_log = f"{timestamp}"
+    if fl_prefix is not None: base_log = f"{fl_prefix}.{base_log}"
+    path_log = os.path.join(drc_log, base_log)
+
+    # ...path
+    os.makedirs(path_log, exist_ok = True)
+    fl_log = f"rank{dist_rank}.log"
+    path_log = os.path.join(path_log, fl_log)
+
+    # Config logging behaviors
+    log_level_spec = {
+        "info"  : logging.INFO,
+        "debug" : logging.DEBUG,
+    }
+    log_level = log_level_spec.get(level, logging.INFO)
+    logging.basicConfig( filename = path_log,
+                         filemode = 'w',
+                         format="%(asctime)s %(levelname)s %(name)s\n%(message)s",
+                         datefmt="%m/%d/%Y %H:%M:%S",
+                         level=log_level, )
+    logger = logging.getLogger(__name__)
+
+    return timestamp

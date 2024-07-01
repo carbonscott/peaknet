@@ -55,7 +55,7 @@ def print_layers(module, max_depth=1, current_indent_width=0, prints_module_name
     _print_current_layer(module, current_indent_width=current_indent_width, prints_module_name=prints_module_name)
 
 
-def is_action_due(iter_num, no_action_interval):
+def is_action_due(iter_num, no_action_interval = None):
     """ iter_num is zero-based.
     """
-    return (iter_num+1) % no_action_interval == 0
+    return no_action_interval is not None and (iter_num + 1) % no_action_interval == 0
