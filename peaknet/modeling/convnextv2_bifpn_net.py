@@ -10,7 +10,8 @@ from math import log
 from dataclasses import dataclass, field, asdict, is_dataclass
 from typing import List, Dict, Optional
 
-from .convnextv2_encoder import ConvNextV2BackboneConfig, ConvNextV2Backbone
+from transformers.models.convnextv2.configuration_convnextv2 import ConvNextV2Config
+from transformers.models.convnextv2.modeling_convnextv2 import ConvNextV2Backbone
 
 from .bifpn        import BiFPN
 from .bifpn_config import BiFPNConfig
@@ -49,10 +50,12 @@ class SegLateralLayer(nn.Module):
 
             # Optional upsampling...
             if self.enables_upsample:
-                x = F.interpolate(x.to(torch.float32),
-                                  scale_factor  = self.base_scale_factor,
-                                  mode          = 'bilinear',
-                                  align_corners = False).to(torch.bfloat16)
+                x = F.interpolate(
+                    x,
+                    scale_factor  = self.base_scale_factor,
+                    mode          = 'bilinear',
+                    align_corners = False
+                )
 
         return x
 
@@ -76,90 +79,42 @@ class SegHeadConfig:
 
 @dataclass
 class PeakNetConfig:
-    backbone          : ConvNextV2BackboneConfig = ConvNextV2Backbone.get_default_config()
+    """
+    ConvNextV2Config params:
+        num_channels      = 1,
+        patch_size        = 4,
+        num_stages        = 4,
+        hidden_sizes      = None,  # [96, 192, 384, 768]
+        depths            = None,  # [3, 3, 9, 3]
+        hidden_act        = "gelu",
+        initializer_range = 0.02,
+        layer_norm_eps    = 1e-12,
+        drop_path_rate    = 0.0,
+        image_size        = 224,
+        out_features      = None,  # out_features = ['stage1', 'stage2', 'stage3', 'stage4']
+        out_indices       = None,
+    """
+    backbone: ConvNextV2Config = ConvNextV2Config(
+        num_channels = 1,
+        out_features = ['stage1', 'stage2', 'stage3', 'stage4'],
+    )
     bifpn             : BiFPNConfig              = BiFPN.get_default_config()
     seg_head          : SegHeadConfig            = SegHeadConfig()
-    channels_in_stages: Optional[Dict[str, int]] = None
+    ## channels_in_stages: Optional[Dict[str, int]] = None  # [96, 192, 384, 768]
 
 
 class PeakNet(nn.Module):
-    @staticmethod
-    def get_default_config():
-        return PeakNetConfig()
-
-
-    @staticmethod
-    def estimate_output_channels(model_name):
-        """ Estimate the output channels for an input backbone.
-
-            Only rank 0 will perform the calculation.
-
-            The output will be saved under the home directory.
-        """
-        rank = int(os.environ.get("RANK", 0))
-
-        cache_dir  = os.getcwd()
-        cache_dir  = os.path.join(cache_dir, '.cache/peaknet')
-        cache_file = os.path.join(cache_dir, f'output_channels.{model_name}.pt')
-
-        if not os.path.exists(cache_file):
-            if rank == 0:
-                print(f"[RANK {rank}] Creating cache for building the model...")
-                os.makedirs(cache_dir, exist_ok=True)
-
-                device = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
-
-                B, C, H, W = 2, 1, 1*(2**4)*4, 1*(2**4)*4
-                batch_input = torch.rand(B, C, H, W, dtype = torch.float, device = device)
-
-                config = ConvNextV2BackboneConfig()
-                config.model_name = model_name
-
-                model = ConvNextV2Backbone(config)
-                model.to(device)
-                model.eval()
-                with torch.no_grad():
-                    stage_feature_maps = model(batch_input)
-                model.train()
-
-                # Explicitly delete the model and input tensor
-                del model
-                del batch_input
-                if device != 'cpu':
-                    torch.cuda.empty_cache()
-
-                output_channels = { f"stage{enum_idx}" : stage_feature_map.shape[1] for enum_idx, stage_feature_map in enumerate(stage_feature_maps) }    # (B, C, H, W)
-
-                torch.save(output_channels, cache_file)
-            else:
-                print(f"[RANK {rank}] Waiting...")
-
-        if dist.is_initialized():
-            dist.barrier()
-
-        if os.path.exists(cache_file):
-            print(f"[RANK {rank}] Loading the model building cache...")
-            return torch.load(cache_file, map_location='cpu')    # CPU is fine for loading python dict
-
-        raise RuntimeError(f"Cache file '{cache_file}' not found. This should not happen after synchronization barrier.")
-
-
     def __init__(self, config = None):
         super().__init__()
 
-        self.config = PeakNet.get_default_config() if config is None else config
+        self.config = config
 
         # Create the image encoder...
         backbone_config = self.config.backbone
         self.backbone = ConvNextV2Backbone(config = backbone_config)
 
-        # Adjust dependent settings based on the chosen pre-trained model...
-        # ...Estimate the output channels
-        backbone_output_channels = self.config.channels_in_stages
-        if backbone_output_channels is None:
-            backbone_output_channels = PeakNet.estimate_output_channels(backbone_config.model_name)
-
         # Create the adapter layer between encoder and bifpn...
+        backbone_output_channels = backbone_config.hidden_sizes
         num_bifpn_features = self.config.bifpn.block.num_features
         self.backbone_to_bifpn = nn.ModuleList([
             nn.Conv2d(in_channels  = in_channels,
@@ -167,7 +122,7 @@ class PeakNet(nn.Module):
                       kernel_size  = 1,
                       stride       = 1,
                       padding      = 0)
-            for _, in_channels in backbone_output_channels.items()
+            for in_channels in backbone_output_channels
         ])
 
         # Create the fusion blocks...
@@ -188,10 +143,10 @@ class PeakNet(nn.Module):
             for num_upscale_layers in num_upscale_layer_list
         ])
 
-        self.head_segmask  = nn.Conv2d(in_channels  = self.config.seg_head.out_channels,
-                                       out_channels = self.config.seg_head.num_classes,
-                                       kernel_size  = 1,
-                                       padding      = 0,)
+        self.head_segmask = nn.Conv2d(in_channels  = self.config.seg_head.out_channels,
+                                      out_channels = self.config.seg_head.num_classes,
+                                      kernel_size  = 1,
+                                      padding      = 0,)
 
         if self.config.seg_head.uses_learned_upsample:
             self.head_upsample_layer = nn.ConvTranspose2d(in_channels  = self.config.seg_head.num_classes,
@@ -205,9 +160,64 @@ class PeakNet(nn.Module):
         return None
 
 
+    def estimate_output_channels(self):
+        """ Estimate the output channels for an input backbone.
+
+            Only rank 0 will perform the calculation.
+
+            The output will be saved under the home directory.
+        """
+        rank = int(os.environ.get("RANK", 0))
+
+        cache_dir  = os.getcwd()
+        cache_dir  = os.path.join(cache_dir, '.cache/peaknet')
+        cache_file = os.path.join(cache_dir, f'output_channels.pt')
+
+        if not os.path.exists(cache_file):
+            if rank == 0:
+                print(f"[RANK {rank}] Creating cache for building the model...")
+                os.makedirs(cache_dir, exist_ok = True)
+
+                device = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
+
+                # Create dummy data, so the exact H and W don't matter
+                B, C, H, W = 2, 1, 1*(2**4)*4, 1*(2**4)*4
+                batch_input = torch.rand(B, C, H, W, dtype = torch.float, device = device)
+
+                model = self.backbone
+                model.to(device)
+                model.eval()
+                with torch.no_grad():
+                    stage_feature_maps = model(batch_input).feature_maps
+                model.train()
+
+                # Explicitly delete the model and input tensor
+                del model
+                del batch_input
+                if device != 'cpu':
+                    torch.cuda.empty_cache()
+
+                output_channels = { f"stage{enum_idx}" : stage_feature_map.shape[1] for enum_idx, stage_feature_map in enumerate(stage_feature_maps) }    # (B, C, H, W)
+
+                torch.save(output_channels, cache_file)
+            else:
+                print(f"[RANK {rank}] Waiting for model building by the main rank...")
+
+        if dist.is_initialized():
+            dist.barrier()
+
+        if os.path.exists(cache_file):
+            print(f"[RANK {rank}] Loading the model building cache...")
+            return torch.load(cache_file, map_location='cpu')    # CPU is fine for loading python dict
+
+        raise RuntimeError(f"Cache file '{cache_file}' not found. This should not happen after synchronization barrier.")
+
+
     def extract_features(self, x):
         # Calculate and save feature maps in multiple resolutions...
-        fmap_in_encoder_layers = self.backbone(x)
+        # The output attributes are defined by https://github.com/huggingface/transformers/blob/e65502951593a76844e872fee9c56b805598538a/src/transformers/models/convnextv2/modeling_convnextv2.py#L568
+        backbone_output = self.backbone(x)
+        fmap_in_encoder_layers = backbone_output.feature_maps
 
         # Apply the BiFPN adapter...
         bifpn_input_list = []
@@ -238,12 +248,14 @@ class PeakNet(nn.Module):
         pred_map = self.head_segmask(fmap_acc)
 
         # Upscale...
-        pred_map = F.interpolate(pred_map.to(torch.float32),
-                                 scale_factor  = self.max_scale_factor,
-                                 mode          = 'bilinear',
-                                 align_corners = False).to(torch.bfloat16) \
-                   if not self.config.seg_head.uses_learned_upsample else  \
-                   self.head_upsample_layer(pred_map)
+        pred_map = F.interpolate(
+            pred_map,
+            scale_factor  = self.max_scale_factor,
+            mode          = 'bilinear',
+            align_corners = False
+        ) \
+        if not self.config.seg_head.uses_learned_upsample else \
+        self.head_upsample_layer(pred_map)
 
         return pred_map
 
