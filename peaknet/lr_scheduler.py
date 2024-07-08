@@ -6,12 +6,13 @@ class CosineLRScheduler(_LRScheduler):
     """ Iteration can mean an epoch, a micro batch or a mini batch.
     """
     def __init__(self, optimizer, warmup_iterations, total_iterations, min_lr=0, last_iteration=-1):
+        self.optimizer         = optimizer
         self.warmup_iterations = warmup_iterations
         self.total_iterations  = total_iterations
         self.min_lr            = min_lr
         self.decay_iterations  = self.total_iterations - self.warmup_iterations
         self.last_iteration    = last_iteration
-        self.base_lrs          = [group['lr'] for group in optimizer.param_groups]
+        self.base_lrs          = [group['lr'] for group in self.optimizer.param_groups]
 
     def get_lr(self):
         """

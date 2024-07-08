@@ -1,55 +1,76 @@
 checkpoint:
-  chkpt_saving_period: 1
-  directory          : experiments/chkpts
-  prefix             : fsdp
-  path_chkpt_prev    : null
-  pretrain           : null
+  chkpt_saving_iterations        : 1
+  preempt_chkpt_saving_iterations: 1
+  directory                      : experiments/chkpts
+  prefix                         : fsdp
+  path_chkpt_prev                : null
+  pretrain                       : null
 dataset:
-  batch_size     : 2
-  num_workers    : 2
-  path_train     : experiments/datasets/safetensor_dataset.train.csv
-  path_eval      : experiments/datasets/safetensor_dataset.validate.csv
-  subset_size    : 100
-  ## server_address : [localhost, 5000]
+  drop_last_in_sampler: true
+  drop_last_in_loader : true
+  batch_size          : 2
+  num_workers         : 2
+  seg_size            : 200
+  path_train          : experiments/datasets/safetensor_dataset.train.csv
+  path_eval           : experiments/datasets/safetensor_dataset.validate.csv
+  debug               : false
+  cache_size          : 10
   transforms:
     H_pad: 2048
     W_pad: 2048
-    num_patch: 100
+    num_patch: 250
     size_patch: 20
     angle_max: 360
     frac_shift_max: 0.1
     downscale_factors: [2, 2]
     var_size_patch: 0.2
+    patch_size: 224
+    stride: 224
+    sampling_fraction: null
 dist:
   backend               : nccl
   uses_unique_world_seed: true
-  dtype                 : float16
+  dtype                 : bfloat16
 logging:
   directory : experiments/logs
   prefix    : fsdp
+  level     : debug
 loss:
+  grad_accum_steps: 10
   focal:
     alpha: 1.0
     gamma: 2.0
-  grad_accum_steps: 10
 lr_scheduler:
-  min_lr           : !!float 1e-7
-  total_iterations : !!int 1_000_000
-  uses_prev        : true
-  warmup_iterations: 5
-  scheduler_step_period: 200
+  min_lr                     : !!float 1e-7
+  total_iterations           : !!int 1_000_000
+  warmup_iterations          : 5
+  scheduler_update_iterations: 1
 misc:
-  max_epochs          : 5
+  max_epochs          : 200
   max_eval_iter       : 50
+  max_eval_retry      : 2
   num_gpus            : 4
+  uses_mixed_precision: true
   compiles_model      : false
   data_dump_on        : false
+  peak_flops_per_sec  : !!float 312e12
+  monitors_dynamics   : false
 model:
   backbone:
-    in_channels: 1
-    model_name: convnextv2_atto.fcmae
-    downloads_weights : true
-    path_pretrain_chkpt : null
+    hf_config:
+      num_channels     : 1
+      patch_size       : 4
+      num_stages       : 4
+      hidden_sizes     : [96, 192, 384, 768]
+      depths           : [3, 3, 9, 3]
+      hidden_act       : "gelu"
+      initializer_range: 0.02
+      layer_norm_eps   : !!float 1e-12
+      drop_path_rate   : 0.0
+      image_size       : 512
+      out_features     : ['stage1', 'stage2', 'stage3', 'stage4']
+      out_indices      : null
+    from_scratch: false
   bifpn:
     block:
       base_level: 4
@@ -79,5 +100,8 @@ model:
   uses_random_weights: false
 optim:
   grad_clip   : 1.0
-  lr          : !!float 2e-4
-  weight_decay: !!float 1e-4
+  lr          : !!float 1.5e-4
+  weight_decay: !!float 0.05
+  beta1       : 0.9
+  beta2       : 0.95
+  fused       : false

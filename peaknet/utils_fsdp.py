@@ -57,7 +57,7 @@ from pkg_resources import packaging
 
 # -- Imports for dataclasses
 from dataclasses import dataclass, asdict
-from typing import Optional
+from typing import Optional, Dict
 
 # -- Rest
 import pickle
@@ -292,22 +292,13 @@ def broadcast_dict(obj, src=0, device = 'cpu'):
 # ----------------------------------------------------------------------- #
 #  CHECKPOINT
 # ----------------------------------------------------------------------- #
-@dataclass
-class TrainingStateDictConfig:
-    epoch      : int
-    seg        : int
-    start_idx  : int
-    end_idx    : int
-    loss_min   : float
-
-
 # -- 1. FULL STATE DICT
 @dataclass
 class FullStateDictCheckpointConfig:
     model          : Optional[nn.Module]    # A FSDP wrapped model on all ranks
     optimizer      : Optional[torch.optim.Optimizer]
     lr_scheduler   : Optional[torch.optim.lr_scheduler._LRScheduler]
-    training_state : Optional[TrainingStateDictConfig]
+    training_state : Optional[Dict]
     rank           : int
     device         : str
     path_checkpoint: Optional[str]
@@ -396,7 +387,6 @@ class FullStateDictCheckpoint:
         training_state = None
         if rank == 0:
             training_state = self.config.training_state
-            training_state = asdict(training_state)
 
         return training_state
 
@@ -461,7 +451,7 @@ class FullStateDictCheckpoint:
         # Scatter the training state to all ranks...
         training_state = broadcast_dict(training_state, src = 0, device = device)
 
-        self.config.training_state = TrainingStateDictConfig(**training_state)
+        self.config.training_state = training_state
 
 
     def _load_lr_scheduler_state_dict(self):
@@ -563,7 +553,7 @@ class ShardedStateDictCheckpointConfig:
     model          : Optional[nn.Module]    # A FSDP wrapped model on all ranks
     optimizer      : Optional[torch.optim.Optimizer]
     lr_scheduler   : Optional[torch.optim.lr_scheduler._LRScheduler]
-    training_state : TrainingStateDictConfig
+    training_state : Dict
     rank           : int
     device         : str
     path_checkpoint: Optional[str]    # Path to a previously saved checkpoint directory
@@ -739,7 +729,6 @@ class ShardedStateDictCheckpoint:
         training_state = None
         if rank == 0:
             training_state = self.config.training_state
-            training_state = asdict(training_state)
 
         return training_state
 
@@ -759,7 +748,7 @@ class ShardedStateDictCheckpoint:
         # Scatter the training state to all ranks...
         training_state = broadcast_dict(training_state, src = 0, device = device)
 
-        self.config.training_state = TrainingStateDictConfig(**training_state)
+        self.config.training_state = training_state
 
 
     def _load_lr_scheduler_state_dict(self):

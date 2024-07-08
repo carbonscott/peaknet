@@ -46,7 +46,7 @@ class Checkpoint:
 
 
     def _prepare_training_state_dict_by_rank0(self):
-        return asdict(self.config.training_state)
+        return self.config.training_state
 
 
     def _load_model_full_state_dict(self):

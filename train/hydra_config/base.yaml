@@ -1,18 +1,24 @@
 defaults:
   - _self_
-  - bsub_config : base
-  - train_config: base
+  - bsub_config   : base
+  - train_config  : base
+  - sbatch_config : base
 
 auto_submit: false
 job: my_job
+skip_preempt: false
 
 path:
-  dir_bsub_template  : 'hydra_config/bsub_config'
-  file_bsub_template : 'template.bsub'
-  dir_bsub_jobs      : 'experiments/bsub'
-  dir_yaml_jobs      : 'experiments/yaml'
-  file_bsub_job      : 'base.bsub'
-  file_yaml_job      : 'base.yaml'
+  dir_bsub_template    : 'hydra_config/bsub_config'
+  file_bsub_template   : 'template.bsub'
+  dir_bsub_jobs        : 'experiments/bsub'
+  file_bsub_job        : 'base.bsub'
+  dir_sbatch_template  : 'hydra_config/sbatch_config'
+  file_sbatch_template : 'template.sbatch'
+  dir_sbatch_jobs      : 'experiments/sbatch'
+  file_sbatch_job      : 'base.sbatch'
+  dir_yaml_jobs        : 'experiments/yaml'
+  file_yaml_job        : 'base.yaml'
 
 hydra:
   run:
