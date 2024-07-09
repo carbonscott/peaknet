@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# -- OLCF specific imports
+# -- S3DF specific imports
 from peaknet.plugins.slac import init_dist_env_on_s3df
 
 # -- Basic imports
@@ -42,6 +42,7 @@ from peaknet.modeling.convnextv2_bifpn_net import (
 )
 from transformers.models.convnextv2.configuration_convnextv2 import ConvNextV2Config
 from transformers.models.convnextv2.modeling_convnextv2 import (
+    ConvNextV2PreTrainedModel,
     ConvNextV2Backbone,
     ConvNextV2Embeddings,
     ConvNextV2Stage,
@@ -288,39 +289,48 @@ memmax = MemoryMaximizer() if dist_local_rank == 0 else None
 #  FSDP SETUP
 # ----------------------------------------------------------------------- #
 # -- FSDP policy
-# --- Mixed precision
-mixed_precision = None
-if verify_bfloat_support:
-    dist_dtype = 'bfloat16'
-    mixed_precision = MixedPrecision(
-        param_dtype  = torch.bfloat16,
-        reduce_dtype = torch.bfloat16,
-        buffer_dtype = torch.bfloat16,
-    )
-else:
-    dist_dtype = 'float16'
-    mixed_precision = MixedPrecision(
-        param_dtype  = torch.float16,
-        reduce_dtype = torch.float16,
-        buffer_dtype = torch.float16,
-    )
-
 # --- Sharding strategy
 sharding_strategy = ShardingStrategy.FULL_SHARD
 ## sharding_strategy = ShardingStrategy.NO_SHARD
 
 # --- Wrapping strategy
 # ---- Use built-in transformer wrap policy
-auto_wrap_policy = partial(
-    transformer_auto_wrap_policy,
-    transformer_layer_cls={
-        ## ConvNextV2Embeddings,
-        ## ConvNextV2Stage,
-        ConvNextV2Layer, # Need to experiment with it
-        ## BiFPN,
-        ## SegLateralLayer,
-    },
+## auto_wrap_policy = partial(
+##     transformer_auto_wrap_policy,
+##     transformer_layer_cls={
+##         ## ConvNextV2Embeddings,
+##         ConvNextV2Stage,
+##         ## ConvNextV2Layer, # Need to experiment with it
+##         ## BiFPN,
+##         ## SegLateralLayer,
+##     },
+## )
+
+def create_auto_wrap_policy(target_layer_classes, min_num_params):
+    def should_wrap_module(module):
+
+        num_params_in_module = sum(p.numel() for p in module.parameters())
+        large_enough = num_params_in_module >= min_num_params
+
+        return (
+            isinstance(module, target_layer_classes)
+            and
+            large_enough
+        )
+
+    return partial(lambda_auto_wrap_policy, lambda_fn = should_wrap_module)
+
+wrap_layer_cls= (
+    ## ConvNextV2Embeddings,
+    ConvNextV2Stage,
+    ## ConvNextV2Layer, # Need to experiment with it
+    ## BiFPN,
+    ## SegLateralLayer,
 )
+wrap_min_num_params = 2000384  # pow of 2 friendly
+
+auto_wrap_policy = create_auto_wrap_policy(wrap_layer_cls, wrap_min_num_params)
+
 
 # --- Activation checkpointing
 non_reentrant_wrapper = partial(
@@ -366,7 +376,7 @@ set_seed(world_seed)
 transforms = (
     ## Norm(detector_norm_params),
     Pad(H_pad, W_pad),
-    ## DownscaleLocalMean(factors = downscale_factors),
+    DownscaleLocalMean(factors = downscale_factors),
     RandomPatch(num_patch = num_patch, H_patch = size_patch, W_patch = size_patch, var_H_patch = var_size_patch, var_W_patch = var_size_patch, returns_mask = False),
     RandomRotate(angle_max),
     RandomShift(frac_y_shift_max = frac_shift_max, frac_x_shift_max = frac_shift_max),
@@ -417,45 +427,24 @@ custom_collate = None
 #  MODEL
 # ----------------------------------------------------------------------- #
 logger.debug(f'[RANK {dist_rank}] Configuring model...')
-## # -- Monkey patch the _init_weights
+# -- Monkey patch the _init_weights
 ## # Account for the (pre)activation spread due to the accumulation of residual paths
-## # --- Encoder
-## def _init_weights_in_encoder(self, module):
-##     """Initialize the weights"""
-##     if isinstance(module, (nn.Linear, nn.Conv2d)):
-##         # Normalize the init std by the number of residual paths
-##         std  = self.config.initializer_range
-##         std *= (2 * self.config.num_hidden_layers)**-0.5  # 1/sqrt(num_residual_layers), cf: GPT-2 paper
-## 
-##         # Slightly different from the TF version which uses truncated_normal for initialization
-##         # cf https://github.com/pytorch/pytorch/pull/5617
-##         module.weight.data.normal_(mean=0.0, std=std)
-##         if module.bias is not None:
-##             module.bias.data.zero_()
-##     elif isinstance(module, nn.LayerNorm):
-##         module.bias.data.zero_()
-##         module.weight.data.fill_(1.0)
-## ViTMAEModel._init_weights = _init_weights_in_encoder
-## 
-## # --- Decoder
-## # HF's MAE doesn't have a _init_weights for decoder, but it initializes the
-## # decoder in the end through the _init_weights from ViTMAEPreTrainedModel
-## def _init_weights_in_decoder(self, module):
-##     """Initialize the weights"""
-##     if isinstance(module, (nn.Linear, nn.Conv2d)):
-##         # Normalize the init std by the number of residual paths
-##         std  = self.config.initializer_range
-##         std *= (2 * self.config.decoder_num_hidden_layers)**-0.5  # 1/sqrt(num_residual_layers), cf: GPT-2 paper
-## 
-##         # Slightly different from the TF version which uses truncated_normal for initialization
-##         # cf https://github.com/pytorch/pytorch/pull/5617
-##         module.weight.data.normal_(mean=0.0, std=std)
-##         if module.bias is not None:
-##             module.bias.data.zero_()
-##     elif isinstance(module, nn.LayerNorm):
-##         module.bias.data.zero_()
-##         module.weight.data.fill_(1.0)
-## ViTMAEPreTrainedModel._init_weights = _init_weights_in_decoder
+def _init_weights(self, module):
+    """Initialize the weights"""
+    if isinstance(module, (nn.Linear, nn.Conv2d)):
+        # Normalize the init std by the number of residual paths
+        std  = self.config.initializer_range
+        ## std *= (2 * self.config.num_hidden_layers)**-0.5  # 1/sqrt(num_residual_layers), cf: GPT-2 paper
+
+        # Slightly different from the TF version which uses truncated_normal for initialization
+        # cf https://github.com/pytorch/pytorch/pull/5617
+        module.weight.data.normal_(mean=0.0, std=std)
+        if module.bias is not None:
+            module.bias.data.zero_()
+    elif isinstance(module, nn.LayerNorm):
+        module.bias.data.zero_()
+        module.weight.data.fill_(1.0)
+ConvNextV2PreTrainedModel._init_weights = _init_weights
 
 # --- Backbone
 backbone_config = ConvNextV2Config(**hf_model_config)
@@ -480,14 +469,6 @@ peaknet_config = PeakNetConfig(
 model = PeakNet(peaknet_config)
 if not uses_dist: model.to(device)
 
-## # Report the init
-## if dist_rank == 0:
-##     for name, module in model.named_modules():
-##         if isinstance(module, (nn.Linear, nn.Conv2d)):
-##             mean = module.weight.data.mean()
-##             std  = module.weight.data.std()
-##             logger.info(f"logevent='INIT' | rank={dist_rank} | module={name} | mean={mean:.6f} | std={std:.6f}")
-
 # !! Make all params trainable, a workaround for pytorch 2.0.1
 torch_version = torch.__version__
 torch_version = torch_version[:torch_version.find("+") if "+" in torch_version else None]
@@ -501,6 +482,11 @@ if dist_rank == 0:
 
 # -- Mixed precision
 mixed_precision_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dist_dtype]
+mixed_precision = MixedPrecision(
+    param_dtype  = mixed_precision_dtype,
+    reduce_dtype = mixed_precision_dtype,
+    buffer_dtype = mixed_precision_dtype,
+)
 
 # --- Autocast
 device_type = 'cuda' if 'cuda' in device else 'cpu'
@@ -565,14 +551,25 @@ if uses_dist:
 grad_sync_context = lambda enables_sync: nullcontext() if enables_sync or not uses_dist else model.no_sync()
 
 # -- Apply activation checkpointing
-ac_layer = ConvNextV2Stage
-if ac_layer is not None:
-    check_fn = lambda submodule: isinstance(submodule, ac_layer)
-    apply_activation_checkpointing(
-        model,
-        checkpoint_wrapper_fn = non_reentrant_wrapper,
-        check_fn              = check_fn
-    )
+def enable_activation_checkpointing(target_layer_classes, min_num_params):
+    def should_wrap_module(module):
+
+        num_params_in_module = sum(p.numel() for p in module.parameters())
+        large_enough = num_params_in_module >= min_num_params
+
+        return (
+            isinstance(module, target_layer_classes)
+            and
+            large_enough
+        )
+
+    return should_wrap_module
+
+apply_activation_checkpointing(
+    model,
+    checkpoint_wrapper_fn = non_reentrant_wrapper,
+    check_fn              = enable_activation_checkpointing(wrap_layer_cls, wrap_min_num_params),
+)
 
 if dist_rank == 0:
     logger.debug(f"Current timestamp: {timestamp}")
@@ -701,8 +698,8 @@ def estimate_loss(dataloader, model, criterion, autocast_context, max_iter = Non
             none_mask[enum_idx] = 1
 
         batch_input, batch_target = batch_data
-        batch_input  = batch_input.to(device, non_blocking = True)
-        batch_target = batch_input.to(device, dtype = torch.bool, non_blocking = True)
+        batch_input  = batch_input.to(device, non_blocking = True, dtype = mixed_precision_dtype)
+        batch_target = batch_target.to(device, non_blocking = True, dtype = mixed_precision_dtype)
 
         if dist_rank == 0:
             logger.debug(f"[RANK {dist_rank}] EVAL - Post fetching")
@@ -829,6 +826,19 @@ def estimate_mfu_per_iteration(model, total_num_tokens_per_iteration, t_detla, p
 
     return mfu
 
+## dtype = torch.bfloat16
+## B, C, H, W = 4, 1, 1024, 1024
+## data = torch.randn(B, C, H, W, dtype = dtype).to(device)
+## 
+## # Forward pass
+## iterations = 10
+## for _ in range(iterations):
+##     print(f"data.dtype = ", data.dtype)
+##     output = model(data)
+##     print(output.size())
+##     output.mean().backward()
+## 
+## import sys; sys.exit(1)
 
 # ----------------------------------------------------------------------- #
 #  TRAINING LOOP
@@ -896,34 +906,39 @@ try:
             if uses_dist:
                 sampler.set_epoch(epoch)
 
-            # [WORKAROUND]
-            # FIXME: Better data cleaning will eliminate None batch
-            if batch_input_shape is None:
-                if dist_rank == 0:
-                    dataset_eval_train.reset()
-                    dataset_eval_train.set_start_idx(0)
-                    dataloader_eval = torch.utils.data.DataLoader(
-                        dataset_eval_train,
-                        batch_size  = batch_size,
-                        sampler     = None,
-                        num_workers = num_workers,
-                        shuffle     = False,
-                        collate_fn  = custom_collate,
-                    )
-                    dataloader_eval_iter = iter(dataloader_eval)
-                    logger.debug(f"[RANK {dist_rank}] Identifying the shape of batch_input...")
-                    while batch_input_shape is None:
-                        try:
-                            batch_data = next(dataloader_eval_iter)
-                            if batch_data is not None:
-                                batch_input, batch_target = batch_data
-                                batch_input_shape = batch_input.shape
-                                logger.debug(f"[RANK {dist_rank}] Shape of batch_input = {batch_input_shape}")
-                        except StopIteration:
-                            raise ValueError(f"[RANK {dist_rank}] No valid eval data found for obtaining the input shape!!!")
-                            break
-                if uses_dist:
-                    batch_input_shape = broadcast_dict(dict(batch_input_shape = batch_input_shape), src = 0, device = device).get('batch_input_shape')
+            ## # [WORKAROUND]
+            ## # FIXME: Better data cleaning will eliminate None batch
+            ## if batch_input_shape is None:
+            ##     if dist_rank == 0:
+            ##         dataset_eval_train.reset()
+            ##         dataset_eval_train.set_start_idx(0)
+            ##         dataloader_eval = torch.utils.data.DataLoader(
+            ##             dataset_eval_train,
+            ##             batch_size  = batch_size,
+            ##             sampler     = None,
+            ##             num_workers = num_workers,
+            ##             shuffle     = False,
+            ##             collate_fn  = custom_collate,
+            ##         )
+            ##         dataloader_eval_iter = iter(dataloader_eval)
+            ##         logger.debug(f"[RANK {dist_rank}] Identifying the shape of batch_input...")
+            ##         while batch_input_shape is None:
+            ##             try:
+            ##                 batch_data = next(dataloader_eval_iter)
+            ##                 if batch_data is not None:
+            ##                     batch_input, batch_target = batch_data
+            ##                     batch_input_shape = batch_input.shape
+            ##                     logger.debug(f"[RANK {dist_rank}] Before broadcast, Shape of batch_input = {batch_input_shape}")
+            ##             except StopIteration:
+            ##                 raise ValueError(f"[RANK {dist_rank}] No valid eval data found for obtaining the input shape!!!")
+            ##                 break
+            ##     else:
+            ##         logger.debug(f"[RANK {dist_rank}] Waiting for rank 0 to finish...")
+            ##     if uses_dist:
+            ##         dist.barrier()
+            ##     if uses_dist:
+            ##         batch_input_shape = broadcast_dict(dict(batch_input_shape = batch_input_shape), src = 0).get('batch_input_shape')
+            ##         logger.debug(f"[RANK {dist_rank}] After broadcast, Shape of batch_input = {batch_input_shape}")
 
             # -- Loop over mini batches
             # --- Set up helper variables for gradient accum and reporting
@@ -962,8 +977,8 @@ try:
                     batch_data = (batch_input, batch_target)
 
                 batch_input, batch_target = batch_data  # (B, C, H, W)
-                batch_input  = batch_input.to(device, non_blocking = True)
-                batch_target = batch_target.to(device, non_blocking = True)
+                batch_input  = batch_input.to(device, non_blocking = True, dtype = mixed_precision_dtype)
+                batch_target = batch_target.to(device, non_blocking = True, dtype = mixed_precision_dtype)
 
                 # Specify the effective grad accum steps
                 real_grad_accum_steps = grad_accum_steps if batch_idx < start_idx_remainder_batches else num_remainder_batches
@@ -975,10 +990,10 @@ try:
                     # Forward
                     with autocast_context:
                         batch_output = model(batch_input)
-                        logger.debug(f"[Rank {dist_rank}] batch_output.shape = {batch_output.size()}")
                         loss = criterion(batch_output, batch_target)
                         loss = loss.mean()
                         loss = loss / real_grad_accum_steps  # scale the loss to account for gradient accumulation
+                        logger.debug(f"[Rank {dist_rank}] loss = {loss}")
 
                     # Accumulate loss
                     total_loss += loss.detach()

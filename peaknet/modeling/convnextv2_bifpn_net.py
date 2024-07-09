@@ -17,6 +17,9 @@ from .bifpn        import BiFPN
 from .bifpn_config import BiFPNConfig
 from .utils_build  import BackboneToBiFPNAdapterConfig, BackboneToBiFPNAdapter
 
+import logging
+logger = logging.getLogger(__name__)
+
 class SegLateralLayer(nn.Module):
 
     def __init__(self, in_channels, out_channels, num_groups, num_layers, base_scale_factor = 2):
