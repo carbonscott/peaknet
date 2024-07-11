@@ -686,6 +686,11 @@ class ShardedStateDictCheckpoint:
         if iter_state is not None:
             self.load_iter_state_checkpoint(rank, iter_state, path_checkpoint_iter_state)
 
+    def pre_fsdp_load(self, rank, model, path_checkpoint):
+        pass
+
+    def post_fsdp_load(self, rank, model, optimizer, lr_scheduler, iter_state, path_checkpoint):
+        self.load(rank, model, optimizer, lr_scheduler, iter_state, path_checkpoint)
 
 # ----------------------------------------------------------------------- #
 #  Logger
