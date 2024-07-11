@@ -63,15 +63,13 @@ from peaknet.criterion import CategoricalFocalLoss
 # --- Others
 from peaknet.utils.seed        import set_seed
 from peaknet.utils.misc        import is_action_due
-from peaknet.utils.checkpoint  import CheckpointConfig, Checkpoint
+from peaknet.utils.checkpoint  import Checkpoint
 from peaknet.lr_scheduler      import CosineLRScheduler
 from peaknet.perf              import Timer
 from peaknet.utils_fsdp import (
     MemoryMaximizer,
     verify_bfloat_support,
-    FullStateDictCheckpointConfig,
     FullStateDictCheckpoint,
-    broadcast_dict,
     init_logger,
 )
 from peaknet.utils.monitor import (
@@ -297,41 +295,41 @@ sharding_strategy = ShardingStrategy.FULL_SHARD
 
 # --- Wrapping strategy
 # ---- Use built-in transformer wrap policy
-## auto_wrap_policy = partial(
-##     transformer_auto_wrap_policy,
-##     transformer_layer_cls={
-##         ## ConvNextV2Embeddings,
-##         ConvNextV2Stage,
-##         ## ConvNextV2Layer, # Need to experiment with it
-##         ## BiFPN,
-##         ## SegLateralLayer,
-##     },
-## )
-
-def create_auto_wrap_policy(target_layer_classes, min_num_params):
-    def should_wrap_module(module):
-
-        num_params_in_module = sum(p.numel() for p in module.parameters())
-        large_enough = num_params_in_module >= min_num_params
-
-        return (
-            isinstance(module, target_layer_classes)
-            and
-            large_enough
-        )
-
-    return partial(lambda_auto_wrap_policy, lambda_fn = should_wrap_module)
-
-wrap_layer_cls= (
-    ## ConvNextV2Embeddings,
-    ConvNextV2Stage,
-    ## ConvNextV2Layer, # Need to experiment with it
-    ## BiFPN,
-    ## SegLateralLayer,
+auto_wrap_policy = partial(
+    transformer_auto_wrap_policy,
+    transformer_layer_cls={
+        ## ConvNextV2Embeddings,
+        ConvNextV2Stage,
+        ## ConvNextV2Layer, # Need to experiment with it
+        ## BiFPN,
+        ## SegLateralLayer,
+    },
 )
-wrap_min_num_params = 2000384  # pow of 2 friendly
 
-auto_wrap_policy = create_auto_wrap_policy(wrap_layer_cls, wrap_min_num_params)
+## def create_auto_wrap_policy(target_layer_classes, min_num_params):
+##     def should_wrap_module(module):
+## 
+##         num_params_in_module = sum(p.numel() for p in module.parameters())
+##         large_enough = num_params_in_module >= min_num_params
+## 
+##         return (
+##             isinstance(module, target_layer_classes)
+##             and
+##             large_enough
+##         )
+## 
+##     return partial(lambda_auto_wrap_policy, lambda_fn = should_wrap_module)
+## 
+## wrap_layer_cls= (
+##     ## ConvNextV2Embeddings,
+##     ConvNextV2Stage,
+##     ## ConvNextV2Layer, # Need to experiment with it
+##     ## BiFPN,
+##     ## SegLateralLayer,
+## )
+## wrap_min_num_params = 2000384  # pow of 2 friendly
+## 
+## auto_wrap_policy = create_auto_wrap_policy(wrap_layer_cls, wrap_min_num_params)
 
 
 # --- Activation checkpointing
@@ -426,6 +424,14 @@ dataset_eval_val = SegmentedPeakNetDataset(dataset_eval_val_config)
 custom_collate = None
 
 # ----------------------------------------------------------------------- #
+#  CHECKPOINT (FULL STATE DICT) PRE FSDP
+# ----------------------------------------------------------------------- #
+## checkpoint_func = FullStateDictCheckpoint if uses_dist else Checkpoint
+checkpoint_func = FullStateDictCheckpoint
+checkpointer = checkpoint_func()
+from_resume = path_chkpt_prev is not None
+
+# ----------------------------------------------------------------------- #
 #  MODEL
 # ----------------------------------------------------------------------- #
 logger.debug(f'[RANK {dist_rank}] Configuring model...')
@@ -482,6 +488,10 @@ if version.parse(torch_version) <= version.parse("2.0.1"):
 if dist_rank == 0:
     logger.debug(f"{sum(p.numel() for p in model.parameters())/1e6} M pamameters.")
 
+if from_resume:
+    if isinstance(checkpointer, FullStateDictCheckpoint):
+        checkpointer.pre_fsdp_load(dist_rank, model, path_chkpt_prev)
+
 # -- Mixed precision
 mixed_precision_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dist_dtype]
 mixed_precision = MixedPrecision(
@@ -503,26 +513,6 @@ scaler = scaler_func(enabled=(dist_dtype == 'float16'))
 if compiles_model:
     logger.debug("Compiling the model...")
     model = torch.compile(model) # requires PyTorch 2.0
-
-# -- CHECKPOINT (FULL STATE DICT)
-print(f'[RANK {dist_rank}] Confguring model checkpoint...')
-chkpt_config_func = FullStateDictCheckpointConfig if uses_dist else CheckpointConfig
-checkpoint_func   = FullStateDictCheckpoint       if uses_dist else Checkpoint
-chkpt_config = chkpt_config_func(
-    model           = model,
-    optimizer       = None,
-    lr_scheduler    = None,
-    iter_state      = None,
-    rank            = dist_rank,
-    device          = device,
-    path_checkpoint = path_chkpt_prev,
-)
-checkpointer = checkpoint_func(config = chkpt_config)
-from_resume = path_chkpt_prev is not None
-if from_resume:
-    if isinstance(checkpointer, FullStateDictCheckpoint):
-        # Model is loaded
-        checkpointer.pre_fsdp_load()
 
 # -- Wrapping the model in FSDP
 if uses_dist:
@@ -553,25 +543,33 @@ if uses_dist:
 grad_sync_context = lambda enables_sync: nullcontext() if enables_sync or not uses_dist else model.no_sync()
 
 # -- Apply activation checkpointing
-def enable_activation_checkpointing(target_layer_classes, min_num_params):
-    def should_wrap_module(module):
+## def enable_activation_checkpointing(target_layer_classes, min_num_params):
+##     def should_wrap_module(module):
+## 
+##         num_params_in_module = sum(p.numel() for p in module.parameters())
+##         large_enough = num_params_in_module >= min_num_params
+## 
+##         return (
+##             isinstance(module, target_layer_classes)
+##             and
+##             large_enough
+##         )
+## 
+##     return should_wrap_module
 
-        num_params_in_module = sum(p.numel() for p in module.parameters())
-        large_enough = num_params_in_module >= min_num_params
-
-        return (
-            isinstance(module, target_layer_classes)
-            and
-            large_enough
-        )
-
-    return should_wrap_module
-
-apply_activation_checkpointing(
-    model,
-    checkpoint_wrapper_fn = non_reentrant_wrapper,
-    check_fn              = enable_activation_checkpointing(wrap_layer_cls, wrap_min_num_params),
-)
+## apply_activation_checkpointing(
+##     model,
+##     checkpoint_wrapper_fn = non_reentrant_wrapper,
+##     check_fn              = enable_activation_checkpointing(wrap_layer_cls, wrap_min_num_params),
+## )
+ac_layer = ConvNextV2Stage
+if ac_layer is not None:
+    check_fn = lambda submodule: isinstance(submodule, ac_layer)
+    apply_activation_checkpointing(
+        model,
+        checkpoint_wrapper_fn = non_reentrant_wrapper,
+        check_fn              = check_fn
+    )
 
 if dist_rank == 0:
     logger.debug(f"Current timestamp: {timestamp}")
@@ -586,7 +584,7 @@ criterion = CategoricalFocalLoss(alpha       = focal_alpha,
 
 
 # ----------------------------------------------------------------------- #
-#  Optimizer
+#  OPTIMIZER AND SCHEDULER
 # ----------------------------------------------------------------------- #
 logger.debug(f'[RANK {dist_rank}] Configuring optimizer...')
 param_iter = model.parameters()
@@ -605,7 +603,7 @@ scheduler = CosineLRScheduler(optimizer         = optimizer,
 
 
 # ----------------------------------------------------------------------- #
-#  CHECKPOINT (FULL STATE DICT)
+#  CHECKPOINT (FULL STATE DICT) POST FSDP
 # ----------------------------------------------------------------------- #
 print(f'[RANK {dist_rank}] Confguring model, optim, scheduler, training state checkpoint...')
 # -- Set init training state dict
@@ -624,10 +622,10 @@ last_seg   = -1
 if from_resume:
     if isinstance(checkpointer, FullStateDictCheckpoint):
         # Optimizer, scheduler are loaded
-        checkpointer.post_fsdp_load(model, optimizer, scheduler, iter_state)
+        checkpointer.post_fsdp_load(dist_rank, model, optimizer, scheduler, iter_state, path_chkpt_prev)
+
 
         # Training state
-        iter_state = checkpointer.config.iter_state
         last_epoch     = iter_state.get("epoch")
         last_seg       = iter_state.get("seg")
         loss_min       = iter_state.get("loss_min")
@@ -1271,7 +1269,7 @@ try:
                             dir_chkpt = f"{timestamp}.epoch_{epoch}.end_idx_{dataset_train.end_idx}"
                             if fl_chkpt_prefix is not None: dir_chkpt = f"{fl_chkpt_prefix}.{dir_chkpt}"
                             path_chkpt = os.path.join(dir_root_chkpt, dir_chkpt)
-                            checkpointer.save(model, optimizer, scheduler, iter_state, path_chkpt)
+                            checkpointer.save(dist_rank, model, optimizer, scheduler, iter_state, path_chkpt)
                             logger.info(f"Saving checkpoint at {path_chkpt}.")
 
                         # All ranks wait until the end of evaluation by rank 0
@@ -1292,7 +1290,7 @@ try:
                         dir_chkpt = f"{timestamp}.preempt"
                         if fl_chkpt_prefix is not None: dir_chkpt = f"{fl_chkpt_prefix}.{dir_chkpt}"
                         path_chkpt = os.path.join(dir_root_chkpt, dir_chkpt)
-                        checkpointer.save(model, optimizer, scheduler, iter_state, path_chkpt)
+                        checkpointer.save(dist_rank, model, optimizer, scheduler, iter_state, path_chkpt)
                         logger.info(f"[RANK {dist_rank}] Saving preemptive checkpoint (epoch {epoch}, end_idx {dataset_train.end_idx}) at {path_chkpt}.")
 
                         if dist_rank == 0:
