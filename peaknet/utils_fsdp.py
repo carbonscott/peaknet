@@ -525,20 +525,20 @@ class ShardedStateDictCheckpoint:
         optim_dict_config = self.optim_dict_config
 
         dist_writer = FileSystemWriter(path_checkpoint_model)
-        with FSDP.state_dict_type(
+        FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
             state_dict_config       = state_dict_config,
             optim_state_dict_config = optim_dict_config,
-        ):
-            model_state_dict = model.state_dict()
-            state_dict_to_save = {"model": model_state_dict}  # FSDP writer requires it.
+        )
+        model_state_dict = model.state_dict()
+        state_dict_to_save = {"model": model_state_dict}  # FSDP writer requires it.
 
-            save_state_dict(
-                state_dict     = state_dict_to_save,
-                storage_writer = dist_writer,
-                planner        = DefaultSavePlanner(),
-            )
+        save_state_dict(
+            state_dict     = state_dict_to_save,
+            storage_writer = dist_writer,
+            planner        = DefaultSavePlanner(),
+        )
 
     def load_model_checkpoint(self, rank, model, path_checkpoint_model):
         """
@@ -572,20 +572,20 @@ class ShardedStateDictCheckpoint:
         optim_dict_config = self.optim_dict_config
 
         dist_writer = FileSystemWriter(path_checkpoint_optim)
-        with FSDP.state_dict_type(
+        FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
             state_dict_config       = state_dict_config,
             optim_state_dict_config = optim_dict_config,
-        ):
-            optim_state_dict = FSDP.optim_state_dict(model, optimizer)
-            state_dict_to_save = {"optim": optim_state_dict}  # FSDP writer requires it.
+        )
+        optim_state_dict = FSDP.optim_state_dict(model, optimizer)
+        state_dict_to_save = {"optim": optim_state_dict}  # FSDP writer requires it.
 
-            save_state_dict(
-                state_dict     = state_dict_to_save,
-                storage_writer = dist_writer,
-                planner        = DefaultSavePlanner(),
-            )
+        save_state_dict(
+            state_dict     = state_dict_to_save,
+            storage_writer = dist_writer,
+            planner        = DefaultSavePlanner(),
+        )
 
 
     def load_optimizer_checkpoint(self, rank, model, optimizer, path_checkpoint_optim):
