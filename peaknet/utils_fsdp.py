@@ -600,7 +600,7 @@ class ShardedStateDictCheckpoint:
             StateDictType.FULL_STATE_DICT,
             state_dict_config       = state_dict_config,
             optim_state_dict_config = optim_dict_config,
-        ):
+        )
         model_state_dict = model.state_dict()
         state_dict_to_load = load_sharded_optimizer_state_dict(
             model_state_dict = model_state_dict,
