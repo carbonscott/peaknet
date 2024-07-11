@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 
 # -- S3DF specific imports
-from peaknet.plugins.slac import init_dist_env_on_s3df
+## from peaknet.plugins.slac import init_dist_env_on_s3df
+from peaknet.plugins.olcf import init_dist_env_on_summit
 
 # -- Basic imports
 import os
@@ -255,7 +256,8 @@ signal.signal(signal.SIGTERM, signal_handler)
 # -- DIST init
 # --- OLCF specific env
 torchrun_exists = int(os.environ.get("RANK", -1)) != -1
-if not torchrun_exists: init_dist_env_on_s3df()
+## if not torchrun_exists: init_dist_env_on_s3df()
+if not torchrun_exists: init_dist_env_on_summit()
 
 # --- Initialize distributed environment
 uses_dist = int(os.environ.get("WORLD_SIZE", 1)) > 1
@@ -510,7 +512,7 @@ chkpt_config = chkpt_config_func(
     model           = model,
     optimizer       = None,
     lr_scheduler    = None,
-    training_state  = None,
+    iter_state      = None,
     rank            = dist_rank,
     device          = device,
     path_checkpoint = path_chkpt_prev,
@@ -608,12 +610,12 @@ scheduler = CosineLRScheduler(optimizer         = optimizer,
 print(f'[RANK {dist_rank}] Confguring model, optim, scheduler, training state checkpoint...')
 # -- Set init training state dict
 loss_min = float('inf')
-training_state = dict(
-    epoch       = 0,
-    seg         = 0,
-    start_idx   = dataset_train.start_idx,
-    end_idx     = dataset_train.end_idx,
-    loss_min    = loss_min,
+iter_state = dict(
+    epoch     = 0,
+    seg       = 0,
+    start_idx = dataset_train.start_idx,
+    end_idx   = dataset_train.end_idx,
+    loss_min  = loss_min,
 )
 
 # -- Optional resumption
@@ -622,23 +624,23 @@ last_seg   = -1
 if from_resume:
     if isinstance(checkpointer, FullStateDictCheckpoint):
         # Optimizer, scheduler are loaded
-        checkpointer.post_fsdp_load(model, optimizer, scheduler, training_state)
+        checkpointer.post_fsdp_load(model, optimizer, scheduler, iter_state)
 
         # Training state
-        training_state = checkpointer.config.training_state
-        last_epoch     = training_state.get("epoch")
-        last_seg       = training_state.get("seg")
-        loss_min       = training_state.get("loss_min")
+        iter_state = checkpointer.config.iter_state
+        last_epoch     = iter_state.get("epoch")
+        last_seg       = iter_state.get("seg")
+        loss_min       = iter_state.get("loss_min")
 
         logger.info(f"Loading from checkpoint -- {path_chkpt_prev}.")
-        logger.info(f"PREV - last_epoch {last_epoch}, last_seg {training_state.get('start_idx')}-{training_state.get('end_idx')}, loss_min = {loss_min}")
+        logger.info(f"PREV - last_epoch {last_epoch}, last_seg {iter_state.get('start_idx')}-{iter_state.get('end_idx')}, loss_min = {loss_min}")
 
 
 # ----------------------------------------------------------------------- #
 #  Monitoring training dynamics
 # ----------------------------------------------------------------------- #
 if monitors_dynamics:
-    modules_to_monitor = (ACT2CLS[model.config.hidden_act], )
+    modules_to_monitor = (ACT2CLS[model.backbone.config.hidden_act], )
     act_monitor = ActivationMonitor(model, modules_to_monitor)
     act_monitor.add_hooks()
 
@@ -861,8 +863,8 @@ try:
         # Otherwise, update the dataset index according to the training state
         else:
             # Update the dataset status
-            dataset_train.start_idx = training_state.get("start_idx")
-            dataset_train.end_idx   = training_state.get("end_idx")
+            dataset_train.start_idx = iter_state.get("start_idx")
+            dataset_train.end_idx   = iter_state.get("end_idx")
 
         # -- Loop over dataset segments
         for seg in tqdm.tqdm(range(dataset_train.num_seg), desc = f'[RANK {dist_rank}] Segment'):
@@ -1016,7 +1018,10 @@ try:
                     # Grad clipping
                     if grad_clip != 0.0:
                         scaler.unscale_(optimizer)
-                        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                        grad_norm = nn.utils.clip_grad_norm_(model.parameters(), grad_clip) \
+                                    if sharding_strategy == ShardingStrategy.NO_SHARD \
+                                    else \
+                                    model.clip_grad_norm_(grad_clip)
 
                     # Update parameters
                     scaler.step(optimizer)
@@ -1094,27 +1099,14 @@ try:
 
                         # Monitor param update
                         current_lr = scheduler.get_lr()[0]  # It's a list
-                        encoder_param_monitor = monitor_param_update_metrics(model.vit.encoder, current_lr)  # Motifs like transformer blocks
-                        decoder_param_monitor = monitor_param_update_metrics(model.decoder.decoder_layers, current_lr)
+                        backbone_param_monitor = monitor_param_update_metrics(model.backbone, current_lr)  # Motifs like transformer blocks
 
-                        for k, v in encoder_param_monitor.get('percent_param_update').items():
+                        for k, v in backbone_param_monitor.get('percent_param_update').items():
                             log_data = {
                                 "rank"      : dist_rank,
                                 "iteration" : iteration_counter,
                                 "logevent"  : "DYNAMICS:PARAMS",
                                 "type"      : "encoder",
-                                "name"      : k,
-                                "update"    : v,
-                            }
-                            log_msg = " | ".join([f"{k}={v}" for k, v in log_data.items()])
-                            logger.info(log_msg)
-
-                        for k, v in decoder_param_monitor.get('percent_param_update').items():
-                            log_data = {
-                                "rank"      : dist_rank,
-                                "iteration" : iteration_counter,
-                                "logevent"  : "DYNAMICS:PARAMS",
-                                "type"      : "decoder",
                                 "name"      : k,
                                 "update"    : v,
                             }
@@ -1270,16 +1262,16 @@ try:
                             loss_min = validate_loss
 
                             # Collect training state
-                            training_state["epoch"]     = epoch
-                            training_state["seg"]       = seg
-                            training_state["start_idx"] = dataset_train.start_idx
-                            training_state["end_idx"]   = dataset_train.end_idx
-                            training_state["loss_min"]  = loss_min
+                            iter_state["epoch"]     = epoch
+                            iter_state["seg"]       = seg
+                            iter_state["start_idx"] = dataset_train.start_idx
+                            iter_state["end_idx"]   = dataset_train.end_idx
+                            iter_state["loss_min"]  = loss_min
 
                             dir_chkpt = f"{timestamp}.epoch_{epoch}.end_idx_{dataset_train.end_idx}"
                             if fl_chkpt_prefix is not None: dir_chkpt = f"{fl_chkpt_prefix}.{dir_chkpt}"
                             path_chkpt = os.path.join(dir_root_chkpt, dir_chkpt)
-                            checkpointer.save(model, optimizer, scheduler, training_state, path_chkpt)
+                            checkpointer.save(model, optimizer, scheduler, iter_state, path_chkpt)
                             logger.info(f"Saving checkpoint at {path_chkpt}.")
 
                         # All ranks wait until the end of evaluation by rank 0
@@ -1291,16 +1283,16 @@ try:
                     # ---- Preemptive checkpointing
                     if preempt_metadata_path is not None and is_action_due(iteration_counter, preempt_chkpt_saving_iterations):
                         # Collect training state
-                        training_state["epoch"]     = epoch
-                        training_state["seg"]       = seg
-                        training_state["start_idx"] = dataset_train.start_idx
-                        training_state["end_idx"]   = dataset_train.end_idx
-                        training_state["loss_min"]  = loss_min
+                        iter_state["epoch"]     = epoch
+                        iter_state["seg"]       = seg
+                        iter_state["start_idx"] = dataset_train.start_idx
+                        iter_state["end_idx"]   = dataset_train.end_idx
+                        iter_state["loss_min"]  = loss_min
 
                         dir_chkpt = f"{timestamp}.preempt"
                         if fl_chkpt_prefix is not None: dir_chkpt = f"{fl_chkpt_prefix}.{dir_chkpt}"
                         path_chkpt = os.path.join(dir_root_chkpt, dir_chkpt)
-                        checkpointer.save(model, optimizer, scheduler, training_state, path_chkpt)
+                        checkpointer.save(model, optimizer, scheduler, iter_state, path_chkpt)
                         logger.info(f"[RANK {dist_rank}] Saving preemptive checkpoint (epoch {epoch}, end_idx {dataset_train.end_idx}) at {path_chkpt}.")
 
                         if dist_rank == 0:
