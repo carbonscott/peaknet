@@ -493,16 +493,16 @@ class FullStateDictCheckpoint:
         path_checkpoint_iter_state = os.path.join(path_checkpoint, self.ITER_STATE_DICT_FILE)
 
         if model is not None:
-            self.load_model_checkpoint(path_checkpoint_model)
+            self.load_model_checkpoint(rank, model, path_checkpoint_model)
 
         if optimizer is not None:
-            self.load_optimizer_checkpoint(path_checkpoint_optim)
+            self.load_optimizer_checkpoint(rank, model, optimizer, path_checkpoint_optim)
 
         if lr_scheduler is not None:
-            self.load_lr_checkpoint(path_checkpoint_lr)
+            self.load_lr_checkpoint(rank, lr_scheduler, path_checkpoint_lr)
 
         if iter_state is not None:
-            self.load_iter_state_checkpoint(path_checkpoint_iter_state)
+            self.load_iter_state_checkpoint(rank, iter_state, path_checkpoint_iter_state)
 
 
 # -- 2. SHARDED STATE DICT
