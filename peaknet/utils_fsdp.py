@@ -561,7 +561,7 @@ class ShardedStateDictCheckpoint:
 
         load_state_dict(
             state_dict     = state_dict_to_load,
-            storage_writer = dist_reader,
+            storage_reader = dist_reader,
             planner        = DefaultLoadPlanner(),
         )
         model_state_dict = state_dict_to_load.get("model")
