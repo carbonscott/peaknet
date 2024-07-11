@@ -597,7 +597,7 @@ class ShardedStateDictCheckpoint:
         dist_reader = FileSystemReader(path_checkpoint_optim)
         FSDP.set_state_dict_type(
             model,
-            StateDictType.FULL_STATE_DICT,
+            StateDictType.SHARDED_STATE_DICT,
             state_dict_config       = state_dict_config,
             optim_state_dict_config = optim_dict_config,
         )
