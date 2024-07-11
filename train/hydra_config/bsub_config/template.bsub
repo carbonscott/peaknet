@@ -40,23 +40,11 @@ head_node_ip=$(echo "$head_node_ip" | awk '{print $1}')
 echo Node IP: $head_node_ip
 export LOGLEVEL=INFO
 
-echo "Starting server..."
-jsrun \
---tasks_per_rs 1 \
---cpu_per_rs {{ num_cpus_for_server }} \
---gpu_per_rs 0 \
---rs_per_host 1 \
---latency_priority cpu-cpu \
---launch_distribution packed \
-python server.ipc.py --num_workers {{ ipc_workers }} &
-
-sleep 10
-
 echo "Running client..."
 jsrun \
---rs_per_host {{ num_gpus_for_client }} \
+--rs_per_host {{ num_gpus_per_node }} \
 --tasks_per_rs 1 \
---cpu_per_rs {{ num_cpus_for_client }} \
+--cpu_per_rs {{ num_cpus_per_node }} \
 --gpu_per_rs 1 \
 --latency_priority gpu-gpu \
 --launch_distribution packed \

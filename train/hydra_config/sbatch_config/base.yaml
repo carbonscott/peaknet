@@ -6,4 +6,4 @@ yaml_config        : 'base.yaml'
 OMP_NUM_THREADS    : 1
 transformers_cache : $HOME/.cache/huggingface
 num_gpus_per_node  : 4
-num_cpus_per_node  : 22
+num_cpus_per_node  : 4
