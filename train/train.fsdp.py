@@ -70,6 +70,7 @@ from peaknet.utils_fsdp import (
     MemoryMaximizer,
     verify_bfloat_support,
     FullStateDictCheckpoint,
+    ShardedStateDictCheckpoint,
     init_logger,
 )
 from peaknet.utils.monitor import (
@@ -150,6 +151,7 @@ fl_chkpt_prefix                 = chkpt_config.get("prefix")
 path_chkpt_prev                 = chkpt_config.get("path_chkpt_prev")
 chkpt_saving_iterations         = chkpt_config.get("chkpt_saving_iterations")
 preempt_chkpt_saving_iterations = chkpt_config.get("preempt_chkpt_saving_iterations")
+state_dict_type                 = chkpt_config.get("state_dict_type")
 
 # -- Dataset
 dataset_config       = config.get("dataset")
@@ -424,10 +426,12 @@ dataset_eval_val = SegmentedPeakNetDataset(dataset_eval_val_config)
 custom_collate = None
 
 # ----------------------------------------------------------------------- #
-#  CHECKPOINT (FULL STATE DICT) PRE FSDP
+#  CHECKPOINT PRE FSDP
 # ----------------------------------------------------------------------- #
-## checkpoint_func = FullStateDictCheckpoint if uses_dist else Checkpoint
-checkpoint_func = FullStateDictCheckpoint
+checkpoint_func = {
+    "full"    : FullStateDictCheckpoint,
+    "sharded" : ShardedStateDictCheckpoint,
+}[state_dict_type] if uses_dist else Checkpoint
 checkpointer = checkpoint_func()
 from_resume = path_chkpt_prev is not None
 
@@ -489,7 +493,7 @@ if dist_rank == 0:
     logger.debug(f"{sum(p.numel() for p in model.parameters())/1e6} M pamameters.")
 
 if from_resume:
-    if isinstance(checkpointer, FullStateDictCheckpoint):
+    if isinstance(checkpointer, checkpoint_func):
         checkpointer.pre_fsdp_load(dist_rank, model, path_chkpt_prev)
 
 # -- Mixed precision
@@ -603,7 +607,7 @@ scheduler = CosineLRScheduler(optimizer         = optimizer,
 
 
 # ----------------------------------------------------------------------- #
-#  CHECKPOINT (FULL STATE DICT) POST FSDP
+#  CHECKPOINT POST FSDP
 # ----------------------------------------------------------------------- #
 print(f'[RANK {dist_rank}] Confguring model, optim, scheduler, training state checkpoint...')
 # -- Set init training state dict
@@ -620,7 +624,7 @@ iter_state = dict(
 last_epoch = 0
 last_seg   = -1
 if from_resume:
-    if isinstance(checkpointer, FullStateDictCheckpoint):
+    if isinstance(checkpointer, checkpoint_func):
         # Optimizer, scheduler are loaded
         checkpointer.post_fsdp_load(dist_rank, model, optimizer, scheduler, iter_state, path_chkpt_prev)
 
@@ -1017,7 +1021,7 @@ try:
                     if grad_clip != 0.0:
                         scaler.unscale_(optimizer)
                         grad_norm = nn.utils.clip_grad_norm_(model.parameters(), grad_clip) \
-                                    if sharding_strategy == ShardingStrategy.NO_SHARD \
+                                    if (not uses_dist) or sharding_strategy == ShardingStrategy.NO_SHARD \
                                     else \
                                     model.clip_grad_norm_(grad_clip)
 
