@@ -346,6 +346,20 @@ backward_prefetch = BackwardPrefetch.BACKWARD_PRE
 
 
 # ----------------------------------------------------------------------- #
+#  TF32 support
+# ----------------------------------------------------------------------- #
+# Ampere architecture (capability_major = 8) is required.
+if device != 'cpu':
+    capability_major, capability_minor = torch.cuda.get_device_capability(device)
+    if capability_major >= 8:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+        if dist_rank == 0:
+            logger.info("[RANK {dist_rank}] TF32 enabled on matmul and cuDNN operations.")
+
+
+# ----------------------------------------------------------------------- #
 #  LOGGING
 # ----------------------------------------------------------------------- #
 # Fetch the current timestamp...
@@ -630,9 +644,9 @@ if from_resume:
 
 
         # Training state
-        last_epoch     = iter_state.get("epoch")
-        last_seg       = iter_state.get("seg")
-        loss_min       = iter_state.get("loss_min")
+        last_epoch = iter_state.get("epoch")
+        last_seg   = iter_state.get("seg")
+        loss_min   = iter_state.get("loss_min")
 
         logger.info(f"Loading from checkpoint -- {path_chkpt_prev}.")
         logger.info(f"PREV - last_epoch {last_epoch}, last_seg {iter_state.get('start_idx')}-{iter_state.get('end_idx')}, loss_min = {loss_min}")
@@ -913,6 +927,8 @@ try:
             ## # [WORKAROUND]
             ## # FIXME: Better data cleaning will eliminate None batch
             ## if batch_input_shape is None:
+            ##     dist.barrier()
+            ##     object_list = [None, ]
             ##     if dist_rank == 0:
             ##         dataset_eval_train.reset()
             ##         dataset_eval_train.set_start_idx(0)
@@ -936,13 +952,10 @@ try:
             ##             except StopIteration:
             ##                 raise ValueError(f"[RANK {dist_rank}] No valid eval data found for obtaining the input shape!!!")
             ##                 break
-            ##     else:
-            ##         logger.debug(f"[RANK {dist_rank}] Waiting for rank 0 to finish...")
+            ##         object_list = [batch_input_shape, ]
             ##     if uses_dist:
-            ##         dist.barrier()
-            ##     if uses_dist:
-            ##         batch_input_shape = broadcast_dict(dict(batch_input_shape = batch_input_shape), src = 0).get('batch_input_shape')
-            ##         logger.debug(f"[RANK {dist_rank}] After broadcast, Shape of batch_input = {batch_input_shape}")
+            ##         dist.broadcast_object_list(object_list, src = 0)
+            ##         batch_input_shape = object_list[0]
 
             # -- Loop over mini batches
             # --- Set up helper variables for gradient accum and reporting
@@ -1278,7 +1291,7 @@ try:
 
                         # All ranks wait until the end of evaluation by rank 0
                         # [WARNING] Expecting NCCL TIMEOUT ERROR if the evaluation takes too long
-                        if dist.is_initialized():
+                        if uses_dist:
                             dist.barrier()
                         logger.debug(f'[RANK {dist_rank}] Done evaluation...')
 
@@ -1312,7 +1325,6 @@ try:
 
         # Reset last_seg
         last_seg = -1
-
 
         # Reset the from_resume flag
         from_resume = False
