@@ -1,3 +1,3 @@
 # PeakNet
 
-![PeakNet](figures/architecture.pdf)
+![PeakNet](figures/architecture.png)
