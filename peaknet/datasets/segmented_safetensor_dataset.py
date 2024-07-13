@@ -17,7 +17,6 @@ from math import ceil
 from collections import OrderedDict
 
 from ..perf import Timer
-from ..utils_fsdp import broadcast_dict
 
 from itertools import islice
 
@@ -80,15 +79,18 @@ class SegmentedPeakNetDataset(Dataset):
 
 
     def _init_file_paths(self):
+        object_list = [None,]  # For communication
         file_paths = []
         if self.dist_rank == 0:
             with open(self.path_csv, 'r') as fh:
                 lines = list(csv.reader(fh))
             file_paths = [ line[0] for line in lines ]
+            object_list = [file_paths,]
 
         if self.dist_world_size > 1:
             logger.debug(f"[RANK {self.dist_rank}] Syncing file paths.")
-            file_paths = broadcast_dict(dict(data = file_paths), src = 0, device = self.device).get('data')
+            dist.broadcast_object_list(object_list, src = 0)
+            file_paths = object_list[0]
 
         return file_paths
 
@@ -164,12 +166,15 @@ class SegmentedPeakNetDataset(Dataset):
             self.item_generator = islice(item_generator, self.start_idx, None)
 
         # Update dataset segment and sync across ranks
+        object_list = [None,]  # For communication
         if self.dist_rank == 0:
             self.current_dataset = self.update_dataset_segment()
+            object_list = [self.current_dataset,]
 
         if self.dist_world_size > 1:
             logger.debug(f"[RANK {self.dist_rank}] Syncing current dataset.")
-            self.current_dataset = broadcast_dict(dict(data = self.current_dataset) , src = 0, device = self.device).get('data')
+            dist.broadcast_object_list(object_list, src = 0)
+            self.current_dataset = object_list[0]
 
         # Reset if reached the end of the item generator???
         if len(self.current_dataset) == 0:
