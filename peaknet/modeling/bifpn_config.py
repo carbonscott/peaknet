@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class BNConfig:
@@ -19,8 +19,8 @@ class BiFPNBlockConfig:
     num_features     : int          = 256
     num_levels       : int          = 4
     base_level       : int          = 2    # ...ResNet50 uses 2, EfficientNet uses 3
-    bn               : BNConfig     = BNConfig()
-    fusion           : FusionConfig = FusionConfig()
+    bn               : BNConfig     = field(default_factory = BNConfig)
+    fusion           : FusionConfig = field(default_factory = FusionConfig)
 
 
 @dataclass

@@ -59,6 +59,22 @@ class DepthwiseSeparableConv2d(nn.Module):
         return x
 
 
+class BiFPNLayerNorm(nn.Module):
+    """
+    Design is similar to https://github.com/huggingface/transformers/blob/7f79a97399bb52aad8460e1da2f36577d5dccfed/src/transformers/models/convnextv2/modeling_convnextv2.py#L111
+    """
+    def __init__(self, normalized_shape, eps = 1e-6):
+        super().__init__()
+
+        self.normalized_shape = normalized_shape
+
+        self.weight = nn.Parameter(torch.ones(normalized_shape))
+        self.bias   = nn.Parameter(torch.zeros(normalized_shape))
+        self.eps    = eps
+
+    def forward(self, x):
+        return F.layer_norm(x.permute(0, 2, 3, 1), self.normalized_shape, self.weight, self.bias, self.eps).permute(0, 3, 1, 2)
+
 
 
 class BiFPNBlock(nn.Module):
@@ -101,9 +117,7 @@ class BiFPNBlock(nn.Module):
                 DepthwiseSeparableConv2d(in_channels  = num_features,
                                          out_channels = num_features,
                                          bias         = False),
-                nn.BatchNorm2d(num_features = num_features,
-                               eps          = self.config.bn.eps,
-                               momentum     = self.config.bn.momentum),
+                BiFPNLayerNorm(normalized_shape = (num_features,)),
                 nn.ReLU(),
             )
             for level in range(min_level, max_level)
@@ -116,9 +130,7 @@ class BiFPNBlock(nn.Module):
                 DepthwiseSeparableConv2d(in_channels  = num_features,
                                          out_channels = num_features,
                                          bias         = False),
-                nn.BatchNorm2d(num_features = num_features,
-                               eps          = self.config.bn.eps,
-                               momentum     = self.config.bn.momentum),
+                BiFPNLayerNorm(normalized_shape = (num_features,)),
                 nn.ReLU(),
             )
             for level in range(min_level + 1, max_level + 1)
@@ -159,10 +171,11 @@ class BiFPNBlock(nn.Module):
             p_high  = p[level_high]
 
             w1, w2 = self.w_m[idx]
+            orig_dtype = m_low.dtype
             m_low_up = F.interpolate(m_low.to(torch.float32),
                                      scale_factor  = self.config.up_scale_factor,
                                      mode          = 'bilinear',
-                                     align_corners = False).to(torch.bfloat16)
+                                     align_corners = False).to(orig_dtype)
             m_fused  = w1 * p_high + w2 * m_low_up
             m_fused /= (w1 + w2 + self.config.fusion.eps)
             m_fused  = self.conv[f"m{level_high}"](m_fused)
@@ -179,10 +192,11 @@ class BiFPNBlock(nn.Module):
             p_low  = p[level_low ]
 
             w1, w2, w3 = self.w_q[idx]
+            orig_dtype = q_high.dtype
             q_high_up = F.interpolate(q_high.to(torch.float32),
                                       scale_factor  = self.config.down_scale_factor,
                                       mode          = 'bilinear',
-                                      align_corners = False).to(torch.bfloat16)
+                                      align_corners = False).to(orig_dtype)
             q_fused  = w1 * p_low + w2 * m_low + w3 * q_high_up
             q_fused /= (w1 + w2 + w3 + self.config.fusion.eps)
             q_fused  = self.conv[f"q{level_low}"](q_fused)
