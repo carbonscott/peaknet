@@ -31,7 +31,8 @@ from peaknet.tensor_transforms import (
     DownscaleLocalMean,
     RandomPatch,
     RandomRotate,
-    RandomShift
+    RandomShift,
+    InstanceNorm,
 )
 
 # --- Model
@@ -396,6 +397,7 @@ transforms = (
     RandomPatch(num_patch = num_patch, H_patch = size_patch, W_patch = size_patch, var_H_patch = var_size_patch, var_W_patch = var_size_patch, returns_mask = False),
     RandomRotate(angle_max),
     RandomShift(frac_y_shift_max = frac_shift_max, frac_x_shift_max = frac_shift_max),
+    InstanceNorm(),
     ## Patchify(patch_size, stride),
     ## BatchSampler(sampling_fraction),
 )

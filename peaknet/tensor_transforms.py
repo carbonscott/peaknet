@@ -15,6 +15,8 @@ Batch augmentation.
 Image shape: (B, C, H, W)
 '''
 
+import logging
+logger = logging.getLogger(__name__)
 
 class Pad:
     def __init__(self, H, W):
@@ -233,3 +235,20 @@ class Norm:
         mean, std = self.detector_norm_params[detector_name]["mean"], self.detector_norm_params[detector_name]["std"]
         C = img.shape[-3]
         return normalize(img, [mean]*C, [std]*C)
+
+
+class InstanceNorm:
+    def __init__(self, eps = 1e-5, checks_nan = True):
+        self.eps = eps
+        self.checks_nan = checks_nan
+
+    def __call__(self, img, **kwargs):
+        if self.checks_nan and torch.isnan(img).any():
+            logger.debug(f"NaN found in the input.")
+
+        mean = img.mean()
+        std  = img.std()
+
+        img = (img - mean) / (std + self.eps)
+
+        return img
