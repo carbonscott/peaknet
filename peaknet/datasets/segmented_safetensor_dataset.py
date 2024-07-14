@@ -143,7 +143,7 @@ class SegmentedPeakNetDataset(Dataset):
         end_idx is not inclusive (up to, but not including end_idx)
         """
         # Calculate and return the end index for the current dataset segment.
-        return self.start_idx + self.seg_size * self.dist_world_size
+        return min(self.start_idx + self.seg_size * self.dist_world_size, self.total_size)
 
 
     @property
