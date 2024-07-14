@@ -277,10 +277,10 @@ def broadcast_dict(obj, src=0, device = 'cpu'):
 # ----------------------------------------------------------------------- #
 # -- 1. FULL STATE DICT
 class FullStateDictCheckpoint:
-    MODEL_STATE_DICT_FILE = 'model_full_state_dict.pt'
-    OPTIM_STATE_DICT_FILE = 'optim_full_state_dict.pt'
-    LR_STATE_DICT_FILE    = 'lr_full_state_dict.pt'
-    ITER_STATE_DICT_FILE  = 'iter_full_state_dict.pt'
+    MODEL_STATE_DICT_FILE = 'model_state_dict.pt'
+    OPTIM_STATE_DICT_FILE = 'optim_state_dict.pt'
+    LR_STATE_DICT_FILE    = 'lr_state_dict.pt'
+    ITER_STATE_DICT_FILE  = 'iter_state_dict.pt'
 
     def __init__(self):
         self.state_dict_config = FullStateDictConfig(
@@ -507,10 +507,10 @@ class FullStateDictCheckpoint:
 
 # -- 2. SHARDED STATE DICT
 class ShardedStateDictCheckpoint:
-    MODEL_STATE_DICT_FILE = 'model_full_state_dict.pt'
-    OPTIM_STATE_DICT_FILE = 'optim_full_state_dict.pt'
-    LR_STATE_DICT_FILE    = 'lr_full_state_dict.pt'
-    ITER_STATE_DICT_FILE  = 'iter_full_state_dict.pt'
+    MODEL_STATE_DICT_DIR = 'model_state_dict.pt'
+    OPTIM_STATE_DICT_DIR = 'optim_state_dict.pt'
+    LR_STATE_DICT_FILE   = 'lr_state_dict.pt'
+    ITER_STATE_DICT_FILE = 'iter_state_dict.pt'
 
     def __init__(self):
         self.state_dict_config = ShardedStateDictConfig(
@@ -651,8 +651,8 @@ class ShardedStateDictCheckpoint:
 
     def save(self, rank, model, optimizer, lr_scheduler, iter_state, path_checkpoint):
         os.makedirs(path_checkpoint, exist_ok = True)
-        path_checkpoint_model      = os.path.join(path_checkpoint, self.MODEL_STATE_DICT_FILE)
-        path_checkpoint_optim      = os.path.join(path_checkpoint, self.OPTIM_STATE_DICT_FILE)
+        path_checkpoint_model      = os.path.join(path_checkpoint, self.MODEL_STATE_DICT_DIR)
+        path_checkpoint_optim      = os.path.join(path_checkpoint, self.OPTIM_STATE_DICT_DIR)
         path_checkpoint_lr         = os.path.join(path_checkpoint, self.LR_STATE_DICT_FILE)
         path_checkpoint_iter_state = os.path.join(path_checkpoint, self.ITER_STATE_DICT_FILE)
 
@@ -669,8 +669,8 @@ class ShardedStateDictCheckpoint:
             self.save_iter_state_checkpoint(rank, iter_state, path_checkpoint_iter_state)
 
     def load(self, rank, model, optimizer, lr_scheduler, iter_state, path_checkpoint):
-        path_checkpoint_model      = os.path.join(path_checkpoint, self.MODEL_STATE_DICT_FILE)
-        path_checkpoint_optim      = os.path.join(path_checkpoint, self.OPTIM_STATE_DICT_FILE)
+        path_checkpoint_model      = os.path.join(path_checkpoint, self.MODEL_STATE_DICT_DIR)
+        path_checkpoint_optim      = os.path.join(path_checkpoint, self.OPTIM_STATE_DICT_DIR)
         path_checkpoint_lr         = os.path.join(path_checkpoint, self.LR_STATE_DICT_FILE)
         path_checkpoint_iter_state = os.path.join(path_checkpoint, self.ITER_STATE_DICT_FILE)
 
