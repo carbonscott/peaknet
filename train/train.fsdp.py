@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 # -- S3DF specific imports
-## from peaknet.plugins.slac import init_dist_env_on_s3df
-from peaknet.plugins.olcf import init_dist_env_on_summit
+from peaknet.plugins.slac import init_dist_env_on_s3df
+## from peaknet.plugins.olcf import init_dist_env_on_summit
 
 # -- Basic imports
 import os
@@ -257,8 +257,8 @@ signal.signal(signal.SIGTERM, signal_handler)
 # -- DIST init
 # --- OLCF specific env
 torchrun_exists = int(os.environ.get("RANK", -1)) != -1
-## if not torchrun_exists: init_dist_env_on_s3df()
-if not torchrun_exists: init_dist_env_on_summit()
+if not torchrun_exists: init_dist_env_on_s3df()
+## if not torchrun_exists: init_dist_env_on_summit()
 
 # --- Initialize distributed environment
 uses_dist = int(os.environ.get("WORLD_SIZE", 1)) > 1
@@ -812,53 +812,115 @@ def get_num_params(model):
     return sum(p.numel() for p in model.parameters())
 
 
-def estimate_mfu_per_iteration(model, total_num_tokens_per_iteration, t_detla, peak_flops_per_sec):
+def estimate_conv_flops(
+        H_input, W_input, C_input, C_output,
+        H_kernel, W_kernel, H_stride, W_stride,
+        H_padding, W_padding, count_multiply_add_as=1
+    ):
+    """
+    Estimate the number of FLOPs for a convolutional layer.
+
+    This function implements the following logic:
+    - Calculate the number of times the kernel is applied (n_H * n_W).
+    - Calculate the FLOPs for a single 2D kernel application.
+    - Multiply by the number of input and output channels.
+
+    The calculation takes into account:
+    - Input dimensions (height, width, channels)
+    - Output channels
+    - Kernel dimensions
+    - Stride
+    - Padding
+
+    Count each multiply-add as this many FLOPs (default is 1)
+    """
+    # Calculate flops for a single 2D kernel application
+    flops_kernel2d = H_kernel * W_kernel * count_multiply_add_as
+
+    # Calculate n_H and n_W (number of times kernel is applied in each dimension)
+    n_H = (H_input + 2*H_padding - H_kernel) // H_stride + 1
+    n_W = (W_input + 2*W_padding - W_kernel) // W_stride + 1
+
+    # Calculate total number of kernel applications
+    num_kernel_travel = n_H * n_W
+
+    # Calculate flops for all channels
+    total_flops = C_input * C_output * num_kernel_travel * flops_kernel2d
+
+    return total_flops
+
+
+def estimate_flops_per_token(model, dummy_shape, patch_size):
+    """
+    Args:
+    model (nn.Module): The convolutional neural network model.
+    dummy_shape (List):
+        - B (int): Batch size.
+        - C (int): Number of channels in the input image.
+        - H (int): Height of the input image.
+        - W (int): Width of the input image.
+    patch_size (int): Size of the patch to calculate FLOPs per token.
+    """
+    hooks = []
+    layer_flops = []
+
+    def hook_fn(module, input, output):
+        if isinstance(module, nn.Conv2d):
+            H_in, W_in = input[0].size(2), input[0].size(3)
+            C_in = module.in_channels
+            C_out = module.out_channels
+            H_kernel, W_kernel = module.kernel_size
+            H_stride, W_stride = module.stride
+            H_padding, W_padding = module.padding
+
+            flops = estimate_conv_flops(H_in, W_in, C_in, C_out, H_kernel, W_kernel, H_stride, W_stride, H_padding, W_padding)
+            layer_flops.append(flops)
+
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Conv2d):
+            hooks.append(module.register_forward_hook(hook_fn))
+
+    # Use dummy data to capture all parameters for estimting a conv mfu
+    B, C, H, W = dummy_shape
+    dummy_input = torch.randn(B, C, H, W)
+
+    model.eval()
+    with torch.no_grad():
+        _ = model(dummy_input)
+
+    for hook in hooks:
+        hook.remove()
+
+    model.train()
+
+    total_flops = sum(layer_flops)
+    num_tokens_per_input = B * (H // patch_size) * (W // patch_size)  # C is taken care by estimate_conv_flops
+    flops_per_token = total_flops / num_tokens_per_input
+
+    return flops_per_token
+
+dummy_shape = 1, 1, 1024, 1024  # Hard coded only to measure flops
+patch_size  = model.backbone.config.patch_size
+num_flops_per_token = estimate_flops_per_token(model, dummy_shape, patch_size)
+
+
+def estimate_mfu_per_iteration(num_flops_per_token, total_num_tokens_per_iteration, t_detla, peak_flops_per_sec):
     """
     Estimate model flops utilization (MFU) in units of peak FLOPS of the GPUs.
 
-    Flops per transformer block per forward pass per token:
-    - num_params    = 12 * token_embd_size**2
-    - num_flops_fwd = 2 * num_params
-
-    Flops per transformer block per fowrwad and backward pass per token:
     - num_flops_bwd    = 2 * num_flops_fwd
     - num_flops_fwdbwd = num_flops_fwd + num_flops_bwd
                        = 3 * num_flops_fwd
-                       = 6 * num_params
 
-    MAE has two transformers: vit encoder and decoder.  The encoder consumes a
-    fraction of the tokens(patches) as compared with the decoder.
     """
-    # Flops per token
-    num_params_in_encoder_layers = get_num_params(model.vit.encoder.layer)
-    num_params_in_decoder_layers = get_num_params(model.decoder.decoder_layers)
-
-    num_flops_encoder_per_token = 6 * num_params_in_encoder_layers
-    num_flops_decoder_per_token = 6 * num_params_in_decoder_layers
-
     # Flops per iteration
-    num_flops_per_iteration = num_flops_encoder_per_token * total_num_tokens_per_iteration * (1 - model.config.mask_ratio) + \
-                              num_flops_decoder_per_token * total_num_tokens_per_iteration
+    num_flops_per_iteration = num_flops_per_token * total_num_tokens_per_iteration
 
     # MFU per iteration
     num_flops_per_iteration_per_sec = num_flops_per_iteration / t_detla
     mfu = num_flops_per_iteration_per_sec / peak_flops_per_sec
 
     return mfu
-
-## dtype = torch.bfloat16
-## B, C, H, W = 4, 1, 1024, 1024
-## data = torch.randn(B, C, H, W, dtype = dtype).to(device)
-## 
-## # Forward pass
-## iterations = 10
-## for _ in range(iterations):
-##     print(f"data.dtype = ", data.dtype)
-##     output = model(data)
-##     print(output.size())
-##     output.mean().backward()
-## 
-## import sys; sys.exit(1)
 
 # ----------------------------------------------------------------------- #
 #  TRAINING LOOP
@@ -1070,8 +1132,7 @@ try:
                     # Log the training loop loss after a forward/backward/update
                     if dist_rank == 0:
                         # MFU
-                        ## mfu_per_iteration = estimate_mfu_per_iteration(model, total_num_tokens, t_delta, peak_flops_per_sec)
-                        mfu_per_iteration = 0
+                        mfu_per_iteration = estimate_mfu_per_iteration(num_flops_per_token, total_num_tokens, t_delta, peak_flops_per_sec)
 
                         # Misc
                         current_lrs   = scheduler.get_lr()
