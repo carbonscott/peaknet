@@ -850,7 +850,11 @@ def estimate_conv_flops(
     return total_flops
 
 
-def estimate_flops_per_token(model, dummy_shape, patch_size):
+def estimate_linear_flops(in_features, out_features, count_multiply_add_as=2):
+    return count_multiply_add_as * in_features * out_features
+
+
+def estimate_flops_per_token(model, dummy_shape, patch_size, count_multiply_add_as = 2, includes_backward = True):
     """
     Args:
     model (nn.Module): The convolutional neural network model.
@@ -860,6 +864,12 @@ def estimate_flops_per_token(model, dummy_shape, patch_size):
         - H (int): Height of the input image.
         - W (int): Width of the input image.
     patch_size (int): Size of the patch to calculate FLOPs per token.
+
+    Forward/Backward
+    - num_flops_bwd    = 2 * num_flops_fwd
+    - num_flops_fwdbwd = num_flops_fwd + num_flops_bwd
+                       = 3 * num_flops_fwd
+
     """
     hooks = []
     layer_flops = []
@@ -873,11 +883,17 @@ def estimate_flops_per_token(model, dummy_shape, patch_size):
             H_stride, W_stride = module.stride
             H_padding, W_padding = module.padding
 
-            flops = estimate_conv_flops(H_in, W_in, C_in, C_out, H_kernel, W_kernel, H_stride, W_stride, H_padding, W_padding)
+            flops = estimate_conv_flops(H_in, W_in, C_in, C_out, H_kernel, W_kernel, H_stride, W_stride, H_padding, W_padding, count_multiply_add_as)
+            layer_flops.append(flops)
+        elif isinstance(module, nn.Linear):
+            in_features = module.in_features
+            out_features = module.out_features
+
+            flops = estimate_linear_flops(in_features, out_features, count_multiply_add_as)
             layer_flops.append(flops)
 
     for name, module in model.named_modules():
-        if isinstance(module, nn.Conv2d):
+        if isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear):
             hooks.append(module.register_forward_hook(hook_fn))
 
     # Use dummy data to capture all parameters for estimting a conv mfu
@@ -894,6 +910,11 @@ def estimate_flops_per_token(model, dummy_shape, patch_size):
     model.train()
 
     total_flops = sum(layer_flops)
+
+    # Include backward pass FLOPs if specified
+    if includes_backward:
+        total_flops *= 3  # Fwd pass + 2x bwd pass
+
     num_tokens_per_input = (H // patch_size) * (W // patch_size)  # C is taken care by estimate_conv_flops
     flops_per_token = total_flops / num_tokens_per_input
 
@@ -901,17 +922,12 @@ def estimate_flops_per_token(model, dummy_shape, patch_size):
 
 dummy_shape = 1, 1, 1024, 1024  # Hard coded only to measure flops
 patch_size  = model.backbone.config.patch_size
-num_flops_per_token = estimate_flops_per_token(model, dummy_shape, patch_size)
+num_flops_per_token = estimate_flops_per_token(model, dummy_shape, patch_size, count_multiply_add_as = 2, includes_backward = True)
 
 
 def estimate_mfu_per_iteration(num_flops_per_token, total_num_tokens_per_iteration, t_detla, peak_flops_per_sec):
     """
     Estimate model flops utilization (MFU) in units of peak FLOPS of the GPUs.
-
-    - num_flops_bwd    = 2 * num_flops_fwd
-    - num_flops_fwdbwd = num_flops_fwd + num_flops_bwd
-                       = 3 * num_flops_fwd
-
     """
     # Flops per iteration
     num_flops_per_iteration = num_flops_per_token * total_num_tokens_per_iteration
