@@ -894,7 +894,7 @@ def estimate_flops_per_token(model, dummy_shape, patch_size):
     model.train()
 
     total_flops = sum(layer_flops)
-    num_tokens_per_input = B * (H // patch_size) * (W // patch_size)  # C is taken care by estimate_conv_flops
+    num_tokens_per_input = (H // patch_size) * (W // patch_size)  # C is taken care by estimate_conv_flops
     flops_per_token = total_flops / num_tokens_per_input
 
     return flops_per_token
