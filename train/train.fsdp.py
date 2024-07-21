@@ -238,6 +238,7 @@ data_dump_on       = misc_config.get("data_dump_on", False)
 cpu_only           = misc_config.get("cpu_only", False)
 peak_flops_per_sec = misc_config.get("peak_flops_per_sec")
 monitors_dynamics  = misc_config.get("monitors_dynamics")
+sharding_stage     = misc_config.get("sharding_stage")
 
 # ----------------------------------------------------------------------- #
 #  MISC FEATURES
@@ -293,8 +294,11 @@ memmax = MemoryMaximizer() if dist_local_rank == 0 else None
 # ----------------------------------------------------------------------- #
 # -- FSDP policy
 # --- Sharding strategy
-sharding_strategy = ShardingStrategy.FULL_SHARD
-## sharding_strategy = ShardingStrategy.NO_SHARD
+sharding_strategy = dict(
+    zero3 = ShardingStrategy.FULL_SHARD,
+    zero2 = ShardingStrategy.SHARD_GRAD_OP,
+    zero0 = ShardingStrategy.NO_SHARD,
+)[sharding_stage]
 
 # --- Wrapping strategy
 # ---- Use built-in transformer wrap policy
@@ -915,8 +919,13 @@ def estimate_flops_per_token(model, dummy_shape, patch_size, count_multiply_add_
     if includes_backward:
         total_flops *= 3  # Fwd pass + 2x bwd pass
 
-    num_tokens_per_input = (H // patch_size) * (W // patch_size)  # C is taken care by estimate_conv_flops
-    flops_per_token = total_flops / num_tokens_per_input
+    # Flops per pixel
+    num_pixels = torch.tensor(dummy_shape).prod().item()
+    flops_per_pixel = total_flops / num_pixels
+
+    # Flops per token
+    token_size = patch_size**2
+    flops_per_token = flops_per_pixel * token_size
 
     return flops_per_token
 
@@ -1047,7 +1056,7 @@ try:
 
             # Aggregate the loss and number of processed tokens during each gradient accumulation
             total_loss       = torch.tensor(0.0, device = device)
-            total_num_tokens = torch.tensor(0, device = device)
+            total_num_tokens = torch.tensor(0.0, device = device)
 
             # Set a timer flag
             starts_timer = True
@@ -1098,7 +1107,7 @@ try:
                     # Accumulate number of tokens processed
                     total_numel = batch_input.numel()  # Get number of numeric elements
                     token_size  = model.config.backbone.patch_size**2
-                    num_tokens  = total_numel // token_size
+                    num_tokens  = total_numel / token_size
                     total_num_tokens += num_tokens
 
                     # Backward

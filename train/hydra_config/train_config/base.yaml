@@ -50,7 +50,7 @@ misc:
   max_epochs          : 50
   max_eval_iter       : 4
   max_eval_retry      : 2
-  num_gpus            : 4
+  sharding_stage      : zero2
   compiles_model      : false
   data_dump_on        : false
   peak_flops_per_sec  : !!float 312e12
