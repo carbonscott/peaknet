@@ -3,6 +3,7 @@ defaults:
   - bsub_config   : base
   - train_config  : base
   - sbatch_config : base
+  - exp_mfu       : base
 
 auto_submit: false
 job: my_job

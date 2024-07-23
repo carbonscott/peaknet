@@ -1,0 +1,119 @@
+checkpoint:
+  state_dict_type                : full
+  chkpt_saving_iterations        : 1
+  preempt_chkpt_saving_iterations: 1
+  directory                      : experiments/chkpts
+  prefix                         : fsdp
+  path_chkpt_prev                : null
+  pretrain                       : null
+dataset:
+  drop_last_in_sampler: true
+  drop_last_in_loader : true
+  batch_size          : 2
+  num_workers         : 2
+  seg_size            : 200
+  path_train          : experiments/datasets/safetensor_dataset.train.csv
+  path_eval           : experiments/datasets/safetensor_dataset.validate.csv
+  debug               : false
+  cache_size          : 10
+  input:
+    C: 1
+    H: 2048
+    W: 2048
+    total_size: 1000000
+  transforms:
+    H_pad: 2048
+    W_pad: 2048
+    num_patch: 250
+    size_patch: 20
+    angle_max: 360
+    frac_shift_max: 0.1
+    downscale_factors: [2, 2]
+    var_size_patch: 0.2
+    patch_size: 224
+    stride: 224
+    sampling_fraction: null
+    set:
+      pad          : False
+      downscale    : False
+      random_patch : False
+      random_rotate: False
+      random_shift : False
+      instance_norm: False
+dist:
+  backend               : nccl
+  uses_unique_world_seed: true
+  dtype                 : float16
+logging:
+  directory : experiments/logs
+  prefix    : fsdp
+  level     : debug
+loss:
+  grad_accum_steps: 4
+  focal:
+    alpha: 1.0
+    gamma: 2.0
+lr_scheduler:
+  min_lr                     : !!float 1e-7
+  total_iterations           : !!int 1_000_000
+  warmup_iterations          : 5
+  scheduler_update_iterations: 1
+misc:
+  max_epochs          : 50
+  max_eval_iter       : 4
+  max_eval_retry      : 2
+  sharding_stage      : zero2
+  compiles_model      : false
+  data_dump_on        : false
+  peak_flops_per_sec  : !!float 312e12
+  monitors_dynamics   : false
+model:
+  backbone:
+    hf_config:
+      num_channels     : 1
+      patch_size       : 4
+      num_stages       : 4
+      hidden_sizes     : [96, 192, 384, 768]
+      depths           : [3, 3, 9, 3]
+      hidden_act       : "gelu"
+      initializer_range: 0.02
+      layer_norm_eps   : !!float 1e-12
+      drop_path_rate   : 0.0
+      image_size       : 1024
+      out_features     : ['stage1', 'stage2', 'stage3', 'stage4']
+      out_indices      : null
+    from_scratch: false
+  bifpn:
+    block:
+      base_level: 4
+      bn:
+        eps: !!float 1.0e-05
+        momentum: 0.1
+      down_scale_factor: 0.5
+      fusion:
+        eps: !!float 1.0e-05
+      num_features: 256
+      num_levels: 4
+      relu_inplace: false
+      up_scale_factor: 2
+    num_blocks: 1
+  freezes_backbone: false
+  seg_head:
+    base_scale_factor: 2
+    num_classes: 2
+    num_groups: 32
+    out_channels: 256
+    up_scale_factor:
+    - 4
+    - 8
+    - 16
+    - 32
+    uses_learned_upsample: false
+  uses_random_weights: false
+optim:
+  grad_clip   : 1.0
+  lr          : !!float 1.5e-4
+  weight_decay: !!float 0.05
+  beta1       : 0.9
+  beta2       : 0.95
+  fused       : false
