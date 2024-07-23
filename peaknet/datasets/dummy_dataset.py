@@ -6,9 +6,11 @@ import torch.distributed as dist
 from torch.utils.data import Dataset
 
 from dataclasses import dataclass
-from typing import Optional, List, Tuple
+from typing import Optional, Union, List, Tuple
 
 from math import ceil
+
+## from ..perf import Timer
 
 import logging
 logger = logging.getLogger(__name__)
@@ -50,14 +52,18 @@ class DistributedSegmentedDummyImageDataConfig:
     total_size     : int
     dist_rank      : int
     dist_world_size: int
+    transforms     : Union[None, List, Tuple]
+    dtype          : torch.dtype
 
 
 class DistributedSegmentedDummyImageData(Dataset):
     def __init__(self, config):
         self.config = config
 
-        self.total_size = self.config.total_size
-        self.seg_size   = self.config.seg_size
+        self.total_size = config.total_size
+        self.seg_size   = config.seg_size
+        self.transforms = config.transforms
+        self.dtype      = config.dtype
 
         self.start_idx   = 0
         self.end_idx     = 0
@@ -75,12 +81,28 @@ class DistributedSegmentedDummyImageData(Dataset):
     def __getitem__(self, idx):
         global_idx = self.current_dataset[idx]
 
+        ## logger.debug(f"[RANK {self.config.dist_rank}] DATA IDX = {global_idx}")
+        ## print(f"[RANK {self.config.dist_rank}] DATA IDX = {global_idx}")
+
         C = self.config.C
         H = self.config.H
         W = self.config.W
 
         input = torch.randn(C, H, W)
         label = torch.randn(C, H, W) > 0.5
+
+        # Apply transformation to input and label at the same time...
+        if self.transforms is not None:
+            data = torch.cat([input[None,], label[None,]], dim = 0)    # (2*B=1, C, H, W)
+            if self.dtype is not None: data = data.to(self.dtype)
+            for enum_idx, trans in enumerate(self.transforms):
+                data = trans(data)
+
+            input = data[0]    # (1, C, H, W)
+            label = data[1]    # (1, C, H, W)
+
+        # Binarize the label...
+        label = label > 0
 
         return input, label
 
