@@ -11,6 +11,8 @@ dataset:
   drop_last_in_loader : true
   batch_size          : 2
   num_workers         : 2
+  pin_memory          : true
+  prefetch_factor     : 20
   seg_size            : 200
   path_train          : experiments/datasets/safetensor_dataset.train.csv
   path_eval           : experiments/datasets/safetensor_dataset.validate.csv

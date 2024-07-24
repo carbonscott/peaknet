@@ -163,6 +163,8 @@ drop_last_in_loader  = dataset_config.get("drop_last_in_loader")
 batch_size           = dataset_config.get("batch_size")
 seg_size             = dataset_config.get("seg_size")
 num_workers          = dataset_config.get("num_workers")
+pin_memory           = dataset_config.get("pin_memory")
+prefetch_factor      = dataset_config.get("prefetch_factor")
 debug_dataloading    = dataset_config.get("debug")
 cache_size           = dataset_config.get("cache_size")
 transforms_config    = dataset_config.get("transforms")
@@ -342,7 +344,7 @@ auto_wrap_policy = partial(
 # --- Activation checkpointing
 non_reentrant_wrapper = partial(
     checkpoint_wrapper,
-    offload_to_cpu  = False,
+    ## offload_to_cpu  = False,
     checkpoint_impl = CheckpointImpl.NO_REENTRANT,
 )
 
@@ -558,7 +560,7 @@ scaler = scaler_func(enabled=(dist_dtype == 'float16'))
 # -- Compile the model
 if compiles_model:
     logger.debug("Compiling the model...")
-    model = torch.compile(model) # requires PyTorch 2.0
+    model = torch.compile(model, mode = "default") # requires PyTorch 2.0
 
 # -- Wrapping the model in FSDP
 if uses_dist:
@@ -924,7 +926,7 @@ def estimate_flops_per_token(model, dummy_shape, patch_size, count_multiply_add_
 
     # Use dummy data to capture all parameters for estimting a conv mfu
     B, C, H, W = dummy_shape
-    dummy_input = torch.randn(B, C, H, W)
+    dummy_input = torch.randn(B, C, H, W, device = device)
 
     model.eval()
     with torch.no_grad():
@@ -1024,11 +1026,13 @@ try:
             ) if uses_dist else None
             dataloader = torch.utils.data.DataLoader(
                 dataset_train,
-                batch_size  = batch_size,
-                sampler     = sampler,
-                num_workers = num_workers,
-                collate_fn  = custom_collate,
-                drop_last   = drop_last_in_loader,
+                batch_size      = batch_size,
+                sampler         = sampler,
+                num_workers     = num_workers,
+                collate_fn      = custom_collate,
+                drop_last       = drop_last_in_loader,
+                pin_memory      = pin_memory,
+                prefetch_factor = prefetch_factor,
             )
 
             # Shuffle the training example
@@ -1050,6 +1054,8 @@ try:
             ##             num_workers = num_workers,
             ##             shuffle     = False,
             ##             collate_fn  = custom_collate,
+            ##             pin_memory      = pin_memory,
+            ##             prefetch_factor = prefetch_factor,
             ##         )
             ##         dataloader_eval_iter = iter(dataloader_eval)
             ##         logger.debug(f"[RANK {dist_rank}] Identifying the shape of batch_input...")
@@ -1301,12 +1307,14 @@ try:
                             ) if uses_dist else None
                             dataloader_eval = torch.utils.data.DataLoader(
                                 dataset_eval_train,
-                                batch_size  = batch_size,
-                                sampler     = sampler_eval,
-                                num_workers = num_workers,
-                                shuffle     = False,
-                                collate_fn  = custom_collate,
-                                drop_last   = drop_last_in_loader,
+                                batch_size      = batch_size,
+                                sampler         = sampler_eval,
+                                num_workers     = num_workers,
+                                shuffle         = False,
+                                collate_fn      = custom_collate,
+                                drop_last       = drop_last_in_loader,
+                                pin_memory      = pin_memory,
+                                prefetch_factor = prefetch_factor,
                             )
 
                             # Shuffle the training example
@@ -1351,12 +1359,14 @@ try:
                             ) if uses_dist else None
                             dataloader_eval = torch.utils.data.DataLoader(
                                 dataset_eval_val,
-                                batch_size  = batch_size,
-                                sampler     = sampler_eval,
-                                num_workers = num_workers,
-                                shuffle     = False,
-                                collate_fn  = custom_collate,
-                                drop_last   = drop_last_in_loader,
+                                batch_size      = batch_size,
+                                sampler         = sampler_eval,
+                                num_workers     = num_workers,
+                                shuffle         = False,
+                                collate_fn      = custom_collate,
+                                drop_last       = drop_last_in_loader,
+                                pin_memory      = pin_memory,
+                                prefetch_factor = prefetch_factor,
                             )
 
                             # Shuffle the validation example

@@ -1,19 +1,19 @@
 #!/bin/bash
 
-RUNS_NSYS=1
+RUNS_NSYS=0
 
-JOB=exp0.3
-INPUT_H=2048
-INPUT_W=2048
-BATCH_SIZE=5
+JOB=exp0.1
+INPUT_H=512
+INPUT_W=512
+BATCH_SIZE=80
 USES_PAD=false
 USES_DOWNSCALE=false
 USES_RANDOM_PATCH=false
 USES_RANDOM_ROTATE=false
 USES_RANDOM_SHIFT=false
-USES_INSTANCE_NORM=false
+USES_INSTANCE_NORM=true
 
-SEG_SIZE=$((BATCH_SIZE * 20))
+SEG_SIZE=$((BATCH_SIZE * 60))
 TOTAL_SIZE=$((BATCH_SIZE * 1000))
 
 python launch_job.slurm.exp_mfu.py \
@@ -24,7 +24,9 @@ exp_mfu.checkpoint.prefix=$JOB \
 exp_mfu.checkpoint.state_dict_type=full \
 exp_mfu.checkpoint.preempt_chkpt_saving_iterations=null \
 exp_mfu.checkpoint.chkpt_saving_iterations=null \
-exp_mfu.dataset.num_workers=2 \
+exp_mfu.dataset.num_workers=4 \
+exp_mfu.dataset.prefetch_factor=20 \
+exp_mfu.dataset.pin_memory=true \
 exp_mfu.dataset.seg_size=$SEG_SIZE \
 exp_mfu.loss.grad_accum_steps=10 \
 exp_mfu.dataset.batch_size=$BATCH_SIZE \
@@ -39,7 +41,7 @@ exp_mfu.dataset.transforms.set.random_shift=$USES_RANDOM_SHIFT \
 exp_mfu.dataset.transforms.set.instance_norm=$USES_INSTANCE_NORM \
 exp_mfu.optim.lr=0.0003 \
 exp_mfu.optim.fused=false \
-exp_mfu.misc.monitors_dynamics=true \
+exp_mfu.misc.monitors_dynamics=false \
 exp_mfu.misc.compiles_model=false \
 exp_mfu.misc.max_eval_iter=10 \
 exp_mfu.lr_scheduler.warmup_iterations=10 \
