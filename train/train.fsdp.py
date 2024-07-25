@@ -425,13 +425,13 @@ transforms = (
         var_H_patch  = var_size_patch,
         var_W_patch  = var_size_patch,
         returns_mask = False,
-    )                                               if uses_random_patch  else NoTransform(),
-    RandomRotate(angle_max)                         if uses_random_rotate else NoTransform(),
+    ) if uses_random_patch  else NoTransform(),
+    RandomRotate(angle_max) if uses_random_rotate else NoTransform(),
     RandomShift(
         frac_y_shift_max = frac_shift_max,
         frac_x_shift_max = frac_shift_max,
-    )                                               if uses_random_shift  else NoTransform(),
-    InstanceNorm()                                  if uses_instance_norm else NoTransform(),
+    ) if uses_random_shift  else NoTransform(),
+    InstanceNorm() if uses_instance_norm else NoTransform(),
 
     ## Patchify(patch_size, stride),
     ## BatchSampler(sampling_fraction),
@@ -779,9 +779,9 @@ def estimate_loss(
         batch_input  = batch_data[                  :current_batch_size]
         batch_target = batch_data[current_batch_size:                  ]
 
-        # Optinally binarize the label
+        # Optionally binarize the label
         if transforms is not None:
-            batch_target = batch_target > 0
+            batch_target = batch_target > 0.5
 
         if dist_rank == 0:
             logger.debug(f"[RANK {dist_rank}] EVAL - Post fetching")
@@ -800,8 +800,8 @@ def estimate_loss(
                 mini_batch = enum_idx
 
                 data_dump = {
-                    "batch_data"   : batch_data,
                     "batch_input"  : batch_input,
+                    "batch_target" : batch_target,
                     "batch_output" : batch_output,
                 }
                 path_data_dump = os.path.join(dir_data_dump, f'{fl_log_prefix}.epoch{epoch}_seg{seg}_minib{mini_batch}.fwd.pt')
@@ -819,7 +819,8 @@ def estimate_loss(
             mini_batch = enum_idx
 
             data_dump = {
-                "batch_data"   : batch_data,
+                "batch_input"  : batch_input,
+                "batch_target" : batch_target,
                 "batch_output" : batch_output,
                 "loss"         : loss,
             }
@@ -1174,9 +1175,9 @@ try:
                 batch_input  = batch_data[                  :current_batch_size]
                 batch_target = batch_data[current_batch_size:                  ]
 
-                # Optinally binarize the label
+                # Optionally binarize the label
                 if transforms is not None:
-                    batch_target = batch_target > 0
+                    batch_target = batch_target > 0.5
 
                 # Specify the effective grad accum steps
                 real_grad_accum_steps = grad_accum_steps if batch_idx < start_idx_remainder_batches else num_remainder_batches
@@ -1359,7 +1360,7 @@ try:
                         num_eval_retry = 0
                         while torch.isnan(train_loss) and (num_eval_retry < max_eval_retry):
                             dataset_eval_train.reset()
-                            high_seg_idx = dataset_eval_train.total_size - seg_size * dist_world_size
+                            high_seg_idx = max(dataset_eval_train.total_size - seg_size * dist_world_size, 1)
                             rand_start_idx = torch.randint(low = 0, high = high_seg_idx, size = (1,)).item()
                             dataset_eval_train.set_start_idx(rand_start_idx)
 
@@ -1413,7 +1414,7 @@ try:
                         num_eval_retry = 0
                         while torch.isnan(validate_loss) and (num_eval_retry < max_eval_retry):
                             dataset_eval_val.reset()
-                            high_seg_idx = dataset_eval_val.total_size - seg_size * dist_world_size
+                            high_seg_idx = max(dataset_eval_val.total_size - seg_size * dist_world_size, 1)
                             rand_start_idx = torch.randint(low = 0, high = high_seg_idx, size = (1,)).item()
                             dataset_eval_val.set_start_idx(rand_start_idx)
 
