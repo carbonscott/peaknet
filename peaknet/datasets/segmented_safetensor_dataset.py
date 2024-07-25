@@ -211,8 +211,8 @@ class SegmentedPeakNetDataset(Dataset):
             image = data[0]    # (1, C, H, W)
             label = data[1]    # (1, C, H, W)
 
-        # Binarize the label...
-        label = label > 0
+            # Binarize the label...
+            label = label > 0
 
         return image, label    # (C, H, W)
 
