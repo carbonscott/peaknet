@@ -212,7 +212,7 @@ class SegmentedPeakNetDataset(Dataset):
             label = data[1]    # (1, C, H, W)
 
             # Binarize the label...
-            label = label > 0
+            label = label > 0.5
 
         return image, label    # (C, H, W)
 
