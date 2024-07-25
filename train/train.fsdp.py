@@ -163,6 +163,8 @@ drop_last_in_loader  = dataset_config.get("drop_last_in_loader")
 batch_size           = dataset_config.get("batch_size")
 seg_size             = dataset_config.get("seg_size")
 num_workers          = dataset_config.get("num_workers")
+pin_memory           = dataset_config.get("pin_memory")
+prefetch_factor      = dataset_config.get("prefetch_factor")
 debug_dataloading    = dataset_config.get("debug")
 cache_size           = dataset_config.get("cache_size")
 transforms_config    = dataset_config.get("transforms")
@@ -178,6 +180,14 @@ patch_size           = transforms_config.get("patch_size")
 stride               = transforms_config.get("stride")
 detector_norm_params = transforms_config.get("norm")
 sampling_fraction    = transforms_config.get("sampling_fraction", None)
+set_transforms       = transforms_config.get("set")
+uses_pad             = set_transforms.get('pad')
+uses_downscale       = set_transforms.get('downscale')
+uses_random_patch    = set_transforms.get('random_patch')
+uses_random_rotate   = set_transforms.get('random_rotate')
+uses_random_shift    = set_transforms.get('random_shift')
+uses_instance_norm   = set_transforms.get('instance_norm')
+
 
 # -- Model
 model_params              = config.get("model")
@@ -342,7 +352,7 @@ auto_wrap_policy = partial(
 # --- Activation checkpointing
 non_reentrant_wrapper = partial(
     checkpoint_wrapper,
-    offload_to_cpu  = False,
+    ## offload_to_cpu  = False,
     checkpoint_impl = CheckpointImpl.NO_REENTRANT,
 )
 
@@ -394,14 +404,35 @@ world_seed = base_seed + seed_offset
 set_seed(world_seed)
 
 # -- Set up transformation
+class NoTransform:
+    def __call__(self, x, **kwargs):
+        return x
+
+pre_transforms = (
+    Pad(H_pad, W_pad) if uses_pad else NoTransform(),
+    DownscaleLocalMean(factors = downscale_factors) if uses_downscale else NoTransform(),
+)
+
 transforms = (
     ## Norm(detector_norm_params),
-    Pad(H_pad, W_pad),
-    DownscaleLocalMean(factors = downscale_factors),
-    RandomPatch(num_patch = num_patch, H_patch = size_patch, W_patch = size_patch, var_H_patch = var_size_patch, var_W_patch = var_size_patch, returns_mask = False),
-    RandomRotate(angle_max),
-    RandomShift(frac_y_shift_max = frac_shift_max, frac_x_shift_max = frac_shift_max),
-    InstanceNorm(),
+
+    ## Pad(H_pad, W_pad)                               if uses_pad           else NoTransform(),
+    ## DownscaleLocalMean(factors = downscale_factors) if uses_downscale     else NoTransform(),
+    RandomPatch(
+        num_patch    = num_patch,
+        H_patch      = size_patch,
+        W_patch      = size_patch,
+        var_H_patch  = var_size_patch,
+        var_W_patch  = var_size_patch,
+        returns_mask = False,
+    )                                               if uses_random_patch  else NoTransform(),
+    RandomRotate(angle_max)                         if uses_random_rotate else NoTransform(),
+    RandomShift(
+        frac_y_shift_max = frac_shift_max,
+        frac_x_shift_max = frac_shift_max,
+    )                                               if uses_random_shift  else NoTransform(),
+    InstanceNorm()                                  if uses_instance_norm else NoTransform(),
+
     ## Patchify(patch_size, stride),
     ## BatchSampler(sampling_fraction),
 )
@@ -410,7 +441,7 @@ transforms = (
 dataset_train_config = SegmentedPeakNetDatasetConfig(
     path_csv        = path_dataset_train,
     seg_size        = seg_size,
-    transforms      = transforms,
+    transforms      = pre_transforms,
     buffer_size     = 1,
     dist_rank       = dist_rank,
     dist_world_size = dist_world_size,
@@ -428,7 +459,7 @@ dataset_eval_train = SegmentedPeakNetDataset(dataset_train_config)
 dataset_eval_val_config = SegmentedPeakNetDatasetConfig(
     path_csv        = path_dataset_eval,
     seg_size        = seg_size,
-    transforms      = transforms,
+    transforms      = pre_transforms,
     buffer_size     = 1,
     dist_rank       = dist_rank,
     dist_world_size = dist_world_size,
@@ -670,7 +701,19 @@ if monitors_dynamics:
 #  HELPER
 # ----------------------------------------------------------------------- #
 @torch.no_grad()
-def estimate_loss(dataloader, model, criterion, autocast_context, max_iter = None, desc = '', device = 'cpu', dummy_input_shape = None, **kwargs):
+def estimate_loss(
+    dataloader,
+    model,
+    criterion,
+    autocast_context,
+    max_iter              = None,
+    desc                  = '',
+    device                = 'cpu',
+    dummy_input_shape     = None,
+    mixed_precision_dtype = torch.float32,
+    transforms            = None,
+    **kwargs
+):
     ''' Estimate loss.
         The dataloader should be wrapped with Dataloader class or
         DistributedSampler class, best with shuffle being true.  The shuffle
@@ -716,23 +759,53 @@ def estimate_loss(dataloader, model, criterion, autocast_context, max_iter = Non
         # FIXME: Better data cleaning will eliminate None batch
         if batch_data is None:
             logger.debug(f"[RANK {dist_rank}] Found None batch at batch idx {enum_idx}.  Creating a dummy input!!!")
-            batch_input, batch_target = batch_data
-            batch_input  = torch.zeros(dummy_input_shape, device = device)
-            batch_target = torch.zeros(dummy_input_shape, dtype = torch.bool, device = device)
+            batch_input  = torch.zeros(dummy_input_shape, dtype = mixed_precision_dtype)
+            batch_target = torch.zeros(dummy_input_shape, dtype = mixed_precision_dtype)
             none_mask[enum_idx] = 1
+            batch_data = (batch_input, batch_target)
 
-        batch_input, batch_target = batch_data
-        batch_input  = batch_input.to(device, non_blocking = True, dtype = mixed_precision_dtype)
-        batch_target = batch_target.to(device, non_blocking = True, dtype = mixed_precision_dtype)
+        # -- Optional batch data transforms on GPUs to improve mfu
+        # Concat data to perform the identical transform on input and target
+        batch_data = torch.cat(batch_data, dim = 0)    # (2*B, C, H, W)
+        batch_data = batch_data.to(device, non_blocking = True, dtype = mixed_precision_dtype)
+
+        # Optional transform
+        if transforms is not None:
+            for enum_idx, trans in enumerate(transforms):
+                batch_data = trans(batch_data)
+
+        # Unpack vars
+        current_batch_size = batch_data.size(0) // 2
+        batch_input  = batch_data[                  :current_batch_size]
+        batch_target = batch_data[current_batch_size:                  ]
+
+        # Optinally binarize the label
+        if transforms is not None:
+            batch_target = batch_target > 0
 
         if dist_rank == 0:
             logger.debug(f"[RANK {dist_rank}] EVAL - Post fetching")
 
+        # -- Forward pass
         with autocast_context:
             if dist_rank == 0:
                 logger.debug(f"[RANK {dist_rank}] EVAL - Forwarding")
 
             batch_output = model(batch_input)
+
+            # !!!!!!!!!!!!!!!
+            # !! Data dump !!
+            # !!!!!!!!!!!!!!!
+            if dist_rank == 0 and data_dump_on:
+                mini_batch = enum_idx
+
+                data_dump = {
+                    "batch_data"   : batch_data,
+                    "batch_input"  : batch_input,
+                    "batch_output" : batch_output,
+                }
+                path_data_dump = os.path.join(dir_data_dump, f'{fl_log_prefix}.epoch{epoch}_seg{seg}_minib{mini_batch}.fwd.pt')
+                torch.save(data_dump, path_data_dump)
 
             if dist_rank == 0:
                 logger.debug(f"[RANK {dist_rank}] EVAL - Loss")
@@ -902,7 +975,7 @@ def estimate_flops_per_token(model, dummy_shape, patch_size, count_multiply_add_
 
     # Use dummy data to capture all parameters for estimting a conv mfu
     B, C, H, W = dummy_shape
-    dummy_input = torch.randn(B, C, H, W)
+    dummy_input = torch.randn(B, C, H, W, device = device)
 
     model.eval()
     with torch.no_grad():
@@ -946,6 +1019,7 @@ def estimate_mfu_per_iteration(num_flops_per_token, total_num_tokens_per_iterati
     mfu = num_flops_per_iteration_per_sec / peak_flops_per_sec
 
     return mfu
+
 
 # ----------------------------------------------------------------------- #
 #  TRAINING LOOP
@@ -1002,11 +1076,13 @@ try:
             ) if uses_dist else None
             dataloader = torch.utils.data.DataLoader(
                 dataset_train,
-                batch_size  = batch_size,
-                sampler     = sampler,
-                num_workers = num_workers,
-                collate_fn  = custom_collate,
-                drop_last   = drop_last_in_loader,
+                batch_size      = batch_size,
+                sampler         = sampler,
+                num_workers     = num_workers,
+                collate_fn      = custom_collate,
+                drop_last       = drop_last_in_loader,
+                pin_memory      = pin_memory,
+                prefetch_factor = prefetch_factor,
             )
 
             # Shuffle the training example
@@ -1028,6 +1104,8 @@ try:
             ##             num_workers = num_workers,
             ##             shuffle     = False,
             ##             collate_fn  = custom_collate,
+            ##             pin_memory      = pin_memory,
+            ##             prefetch_factor = prefetch_factor,
             ##         )
             ##         dataloader_eval_iter = iter(dataloader_eval)
             ##         logger.debug(f"[RANK {dist_rank}] Identifying the shape of batch_input...")
@@ -1078,13 +1156,27 @@ try:
                 # FIXME: Better data cleaning will eliminate None batch
                 if batch_data is None:
                     logger.debug(f"[RANK {dist_rank}] Found None batch at batch idx {batch_idx}.  Creating a dummy input!!!")
-                    batch_input  = torch.zeros(batch_input_shape, dtype = mixed_precision_dtype, device = device)
-                    batch_target = torch.zeros(batch_input_shape, dtype = torch.bool, device = device)
+                    batch_input  = torch.zeros(batch_input_shape, dtype = mixed_precision_dtype)
+                    batch_target = torch.zeros(batch_input_shape, dtype = mixed_precision_dtype)
                     batch_data = (batch_input, batch_target)
 
-                batch_input, batch_target = batch_data  # (B, C, H, W)
-                batch_input  = batch_input.to(device, non_blocking = True, dtype = mixed_precision_dtype)
-                batch_target = batch_target.to(device, non_blocking = True, dtype = mixed_precision_dtype)
+                # Concat data to perform the identical transform on input and target
+                batch_data = torch.cat(batch_data, dim = 0)    # (2*B, C, H, W)
+                batch_data = batch_data.to(device, non_blocking = True, dtype = mixed_precision_dtype)
+
+                # Optional transform
+                if transforms is not None:
+                    for enum_idx, trans in enumerate(transforms):
+                        batch_data = trans(batch_data)
+
+                # Unpack vars
+                current_batch_size = batch_data.size(0) // 2
+                batch_input  = batch_data[                  :current_batch_size]
+                batch_target = batch_data[current_batch_size:                  ]
+
+                # Optinally binarize the label
+                if transforms is not None:
+                    batch_target = batch_target > 0
 
                 # Specify the effective grad accum steps
                 real_grad_accum_steps = grad_accum_steps if batch_idx < start_idx_remainder_batches else num_remainder_batches
@@ -1279,12 +1371,14 @@ try:
                             ) if uses_dist else None
                             dataloader_eval = torch.utils.data.DataLoader(
                                 dataset_eval_train,
-                                batch_size  = batch_size,
-                                sampler     = sampler_eval,
-                                num_workers = num_workers,
-                                shuffle     = False,
-                                collate_fn  = custom_collate,
-                                drop_last   = drop_last_in_loader,
+                                batch_size      = batch_size,
+                                sampler         = sampler_eval,
+                                num_workers     = num_workers,
+                                shuffle         = False,
+                                collate_fn      = custom_collate,
+                                drop_last       = drop_last_in_loader,
+                                pin_memory      = pin_memory,
+                                prefetch_factor = prefetch_factor,
                             )
 
                             # Shuffle the training example
@@ -1297,10 +1391,12 @@ try:
                                 model,
                                 criterion,
                                 autocast_context,
-                                max_iter          = max_eval_iter,
-                                desc              = '(training set)',
-                                device            = device,
-                                dummy_input_shape = batch_input_shape,
+                                max_iter              = max_eval_iter,
+                                desc                  = '(training set)',
+                                device                = device,
+                                dummy_input_shape     = batch_input_shape,
+                                mixed_precision_dtype = mixed_precision_dtype,
+                                transforms            = transforms,
                                 **data_dump_timestamp,
                             )
                             num_eval_retry += 1
@@ -1329,12 +1425,14 @@ try:
                             ) if uses_dist else None
                             dataloader_eval = torch.utils.data.DataLoader(
                                 dataset_eval_val,
-                                batch_size  = batch_size,
-                                sampler     = sampler_eval,
-                                num_workers = num_workers,
-                                shuffle     = False,
-                                collate_fn  = custom_collate,
-                                drop_last   = drop_last_in_loader,
+                                batch_size      = batch_size,
+                                sampler         = sampler_eval,
+                                num_workers     = num_workers,
+                                shuffle         = False,
+                                collate_fn      = custom_collate,
+                                drop_last       = drop_last_in_loader,
+                                pin_memory      = pin_memory,
+                                prefetch_factor = prefetch_factor,
                             )
 
                             # Shuffle the validation example
@@ -1346,10 +1444,12 @@ try:
                                 model,
                                 criterion,
                                 autocast_context,
-                                max_iter          = max_eval_iter,
-                                desc              = '(validation set)',
-                                device            = device,
-                                dummy_input_shape = batch_input_shape,
+                                max_iter              = max_eval_iter,
+                                desc                  = '(validation set)',
+                                device                = device,
+                                dummy_input_shape     = batch_input_shape,
+                                mixed_precision_dtype = mixed_precision_dtype,
+                                transforms            = transforms,
                                 **data_dump_timestamp,
                             )
                             num_eval_retry += 1
