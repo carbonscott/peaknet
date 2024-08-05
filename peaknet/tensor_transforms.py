@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import torchvision
-from torchvision.transforms.functional import rotate, normalize, crop
+from torchvision.transforms.functional import rotate, normalize
 
 import random
 
