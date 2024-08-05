@@ -384,3 +384,20 @@ class MergeBatchPatchDims:
     def __call__(self, x):
         B, N, C, H, W = x.size()
         return x.view(B*N, C, H, W)
+
+
+class BatchSampler:
+    def __init__(self, sampling_fraction = None, dim = 0):
+        if sampling_fraction is not None and (sampling_fraction <= 0.0 or sampling_fraction > 1.0):
+            raise ValueError("sampling_fraction must be None or a number between 0 and 1.")
+        self.sampling_fraction = sampling_fraction
+        self.dim               = dim
+
+    def __call__(self, image_tensor, **kwargs):
+        if self.sampling_fraction is not None:
+            dim_size       = image_tensor.size(self.dim)
+            sample_size    = max(int(dim_size * self.sampling_fraction), 1)
+            sample_indices = torch.randperm(dim_size)[:sample_size]
+            image_tensor   = image_tensor.transpose(self.dim, 0)[sample_indices].transpose(0, self.dim)
+
+        return image_tensor
