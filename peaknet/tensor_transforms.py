@@ -257,8 +257,35 @@ class InstanceNorm:
 class PolarCenterCrop:
     def __init__(self, Hv, Wv, sigma = 0.33, num_crop = 1):
         """
-        Arguments:
-            sigma (float): 1/3 sigma follwoing the 68-95-99.7 rule .
+        Performs random center cropping on batches of images using polar coordinates.
+
+        This class implements a batched multi-crop operation where crop centers are
+        determined using polar coordinates. It supports processing multiple images
+        simultaneously and generating multiple crops per image.
+
+        Key Features:
+        - Batch processing: Can process multiple images in a single call.
+        - Multi-crop: Generates multiple crops per image.
+        - Polar sampling: Uses polar coordinates for random center selection,
+          allowing for more controlled distribution of crop centers.
+        - Efficient implementation: Utilizes PyTorch's advanced indexing for fast cropping.
+
+        Args:
+            Hv (int): Height of the crop.
+            Wv (int): Width of the crop.
+            sigma (float, optional): Standard deviation for the radial distribution of crop centers.
+                                     Defaults to 0.33, following the 68-95-99.7 rule.
+            num_crop (int, optional): Number of crops to generate per image. Defaults to 1.
+
+        Example:
+            >>> cropper = PolarCenterCrop(224, 224, sigma=0.5, num_crop=5)
+            >>> batch = torch.rand(32, 1, 1920, 1920)  # 32 single-channel images of size 256x256
+            >>> crops = cropper(batch)  # Returns tensor of shape (32, 5, 1, 1920, 1920)
+
+        Note:
+            The input images should be PyTorch tensors with shape (B, C, H, W),
+            where B is the batch size, C is the number of channels, and H and W
+            are the height and width of the images respectively.
         """
         self.Hv       = Hv
         self.Wv       = Wv
@@ -268,8 +295,17 @@ class PolarCenterCrop:
 
     def __call__(self, img):
         """
-        Arguments:
-            img (torch.tensor): (B, C, H, W)
+        Perform the multi-crop operation on a batch of images.
+
+        Args:
+            img (torch.Tensor): Input images tensor of shape (B, C, H, W),
+                                where B is the batch size, C is the number of channels,
+                                and H and W are the height and width of the images.
+
+        Returns:
+            torch.Tensor: Cropped images tensor of shape (B, N, C, Hv, Wv),
+                          where N is the number of crops per image, and Hv and Wv
+                          are the height and width of each crop.
         """
         Hv    = self.Hv
         Wv    = self.Wv
