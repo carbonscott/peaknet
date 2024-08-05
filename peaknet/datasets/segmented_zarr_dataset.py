@@ -1,7 +1,5 @@
 import csv
-
-from safetensors.torch import load_file
-from collections import deque
+import zarr
 
 import torch
 import torch.distributed as dist
@@ -98,8 +96,8 @@ class SegmentedPeakNetDataset(Dataset):
     def _item_generator(self):
         for file_idx, file_path in enumerate(self.file_paths):
             try:
-                data = load_file(file_path, device = 'cpu')
-                num_items = data["image"].shape[0]
+                data = zarr.open(file_path, mode = 'r')
+                num_items = data.get('images').shape[0]
                 for item_idx in range(num_items):
                     yield file_idx, item_idx
 
@@ -113,8 +111,8 @@ class SegmentedPeakNetDataset(Dataset):
         total_size = 0
         for file_idx, file_path in enumerate(self.file_paths):
             try:
-                data = load_file(file_path, device = 'cpu')
-                num_items = data["image"].shape[0]
+                data = zarr.open(file_path, mode = 'r')
+                num_items = data.get('images').shape[0]
                 total_size += num_items
 
             except Exception as e:
@@ -193,16 +191,16 @@ class SegmentedPeakNetDataset(Dataset):
             if len(self.data_buffer) == self.buffer_size:
                 file_path_oldest, data_oldest = self.data_buffer.popitem(last=False)
                 ## print(f"{file_path_oldest} is cleared.")
-            self.data_buffer[file_path] = load_file(file_path, device = 'cpu')
+            self.data_buffer[file_path] = zarr.open(file_path, mode = 'r')
 
         # Retrieve specific image and label tensors
         data = self.data_buffer[file_path]
-        image = data["image"][item_idx]
-        label = data["label"][item_idx]
+        image = data.get("images")[item_idx][None,]
+        label = data.get("labels")[item_idx][None,]
 
         # Apply transformation to image and label at the same time...
         if self.transforms is not None:
-            data = torch.cat([image[None,], label[None,]], dim = 0)    # (2*B=1, C, H, W)
+            data = torch.cat([image, label], dim = 0)    # (2*B=1, C, H, W)
             if self.dtype is not None: data = data.to(self.dtype)
             for enum_idx, trans in enumerate(self.transforms):
                 with Timer(tag = f"Transform method {enum_idx:d}", is_on = self.perfs_runtime):
