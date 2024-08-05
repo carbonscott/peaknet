@@ -227,6 +227,7 @@ class Patchify:
 
         return batch_patches
 
+
 class Norm:
     def __init__(self, detector_norm_params):
         self.detector_norm_params = detector_norm_params
@@ -377,3 +378,9 @@ class PolarCenterCrop:
 
         # Apply indexing to get the final crops
         return img_expanded[mesh_B, mesh_N, mesh_C, mesh_H, mesh_W]
+
+
+class MergeBatchPatchDims:
+    def __call__(self, x):
+        B, N, C, H, W = x.size()
+        return x.view(B*N, C, H, W)
