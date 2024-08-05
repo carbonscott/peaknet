@@ -3,11 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import torchvision
-from torchvision.transforms.functional import rotate, normalize
+from torchvision.transforms.functional import rotate, normalize, crop
 
 import random
 
-from math import ceil
+import math
 
 '''
 Batch augmentation.
@@ -205,7 +205,7 @@ class Patchify:
 
         B, C, H, W = batch_img.shape
 
-        H_padded, W_padded = patch_size * ceil(H / patch_size), patch_size * ceil(W / patch_size)
+        H_padded, W_padded = patch_size * math.ceil(H / patch_size), patch_size * math.ceil(W / patch_size)
 
         padder = Pad(H_padded, W_padded)
         batch_img_padded = padder(batch_img)
@@ -252,3 +252,92 @@ class InstanceNorm:
         img = (img - mean) / (std + self.eps)
 
         return img
+
+
+class PolarCenterCrop:
+    def __init__(self, Hv, Wv, sigma = 0.33, num_crop = 1):
+        """
+        Arguments:
+            sigma (float): 1/3 sigma follwoing the 68-95-99.7 rule .
+        """
+        self.Hv       = Hv
+        self.Wv       = Wv
+        self.sigma    = sigma
+        self.num_crop = num_crop
+
+
+    def __call__(self, img):
+        """
+        Arguments:
+            img (torch.tensor): (B, C, H, W)
+        """
+        Hv    = self.Hv
+        Wv    = self.Wv
+        sigma = self.sigma
+        N     = self.num_crop
+
+        # -- Valid H and W
+        B, C, H, W = img.shape
+        H_valid = H - Hv
+        W_valid = W - Wv
+
+        # -- Polar random sampling for determining the crop center
+        # Sample from uniform angle and Gaussian radius
+        device = img.device
+        theta  = torch.rand (B, N, device=device) * math.pi * 2  # (B, N)
+        radius = torch.randn(B, N, device=device).abs() * sigma  # (B, N)
+
+        # Convert them to Cartesian
+        cy = radius * torch.cos(theta)  # image y = Cartesian x
+        cx = radius * torch.sin(theta)  # image x = Cartesian y
+
+        # Clamp to avoid overflow
+        cy.clamp_(min = -1, max = 1)
+        cx.clamp_(min = -1, max = 1)
+
+        # Rescale it to half image length
+        cy *= H_valid/2
+        cx *= W_valid/2
+
+        # Calculate the top-left(tl) coordinates used for fancy indexing
+        tly = cy - Hv//2  # (B, N)
+        tlx = cx - Wv//2  # (B, N)
+        tly = tly.int()
+        tlx = tlx.int()
+
+        # -- Multi-crop
+        # Create a view of multiple images
+        img_expanded = img.unsqueeze(1).expand(-1,N,-1,-1,-1) # (B,C,H,W) -> (B,N,C,H,W)
+
+        # Create indexing tensor along each dimension (B, N, C, H, W)
+        idx_tensor_B = torch.arange(B , dtype=torch.int, device=device)
+        idx_tensor_N = torch.arange(N , dtype=torch.int, device=device)
+        idx_tensor_C = torch.arange(C , dtype=torch.int, device=device)
+        idx_tensor_H = torch.arange(Hv, dtype=torch.int, device=device)
+        idx_tensor_W = torch.arange(Wv, dtype=torch.int, device=device)
+
+        # Create meshgrid for advanced indexing
+        # Note: We only use the first three outputs, others are discarded
+        mesh_B, mesh_N, mesh_C, _, _ = torch.meshgrid(
+            idx_tensor_B,
+            idx_tensor_N,
+            idx_tensor_C,
+            idx_tensor_H,
+            idx_tensor_W,
+            indexing = 'ij'
+        )
+
+        # Generate indexing tensors for height and width
+        idx_tensor_W = tlx[:,:,None] + idx_tensor_W[None,None,:]  # tlx:(B,N,1) + idx_tensor_W:(1,1,Wv) -> (B,N,Wv)
+        idx_tensor_H = tly[:,:,None] + idx_tensor_H[None,None,:]  # tly:(B,N,1) + idx_tensor_H:(1,1,Hv) -> (B,N,Hv)
+
+        # Expand indexing tensors to match desired dimensions
+        idx_tensor_W = idx_tensor_W[:,:,None,:].expand(-1,-1,Hv,-1)  # (B,N,1,Wv) -> (B,N,Hv,Wv)
+        idx_tensor_H = idx_tensor_H[:,:,:,None].expand(-1,-1,-1,Wv)  # (B,N,Hv,1) -> (B,N,Hv,Wv)
+
+        # Create final advanced/fancy indexing tensors
+        mesh_H = idx_tensor_H[:,:,None,:,:].expand(B,-1,C,-1,-1)  # (B,N,1,Hv,Wv) -> (B,N,C,Hv,Wv)
+        mesh_W = idx_tensor_W[:,:,None,:,:].expand(B,-1,C,-1,-1)  # (B,N,1,Hv,Wv) -> (B,N,C,Hv,Wv)
+
+        # Apply indexing to get the final crops
+        return img_expanded[mesh_B, mesh_N, mesh_C, mesh_H, mesh_W]
