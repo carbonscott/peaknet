@@ -247,12 +247,14 @@ class InstanceNorm:
         if self.checks_nan and torch.isnan(img).any():
             logger.debug(f"NaN found in the input.")
 
-        mean = img.mean()
-        std  = img.std()
+        B, C, H, W = img.size()
+        img_view = img.view(B, C, H*W)
+        mean = img_view.mean(dim=-1, keepdim=True)
+        var  = img_view.var (dim=-1, keepdim=True, correction=0)
 
-        img = (img - mean) / (std + self.eps)
+        img_norm = (img_view - mean) / torch.sqrt(var + self.eps)
 
-        return img
+        return img_norm.view(B, C, H, W)
 
 
 class PolarCenterCrop:
