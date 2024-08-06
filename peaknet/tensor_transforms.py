@@ -294,7 +294,7 @@ class PolarCenterCrop:
         self.num_crop = num_crop
 
 
-    def __call__(self, img):
+    def __call__(self, img, **kwargs):
         """
         Perform the multi-crop operation on a batch of images.
 
@@ -381,7 +381,7 @@ class PolarCenterCrop:
 
 
 class MergeBatchPatchDims:
-    def __call__(self, x):
+    def __call__(self, x, **kwargs):
         B, N, C, H, W = x.size()
         return x.view(B*N, C, H, W)
 
@@ -401,3 +401,13 @@ class BatchSampler:
             image_tensor   = image_tensor.transpose(self.dim, 0)[sample_indices].transpose(0, self.dim)
 
         return image_tensor
+
+
+class NDArrayToTensor:
+    def __call__(self, x, **kwargs):
+        return torch.from_numpy(x)
+
+
+class NoTransform:
+    def __call__(self, x, **kwargs):
+        return x
