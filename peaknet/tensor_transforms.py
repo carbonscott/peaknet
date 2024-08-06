@@ -239,7 +239,7 @@ class Norm:
 
 
 class InstanceNorm:
-    def __init__(self, eps = 1e-5, checks_nan = True):
+    def __init__(self, eps = 1e-6, checks_nan = True):
         self.eps = eps
         self.checks_nan = checks_nan
 
