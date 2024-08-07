@@ -51,4 +51,4 @@ class CategoricalFocalLoss(nn.Module):
         '''
         B, C, H, W = batch_mask_true.shape
 
-        return F.one_hot(batch_mask_true.to(torch.long).reshape(B, -1), num_classes = self.num_classes).permute(0, 2, 1).reshape(B, -1, H, W)
+        return F.one_hot(batch_mask_true.to(torch.long).view(B, -1), num_classes = self.num_classes).permute(0, 2, 1).view(B, -1, H, W)
