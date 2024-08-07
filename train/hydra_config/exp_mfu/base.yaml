@@ -20,28 +20,30 @@ dataset:
   cache_size          : 10
   input:
     C: 1
-    H: 2048
-    W: 2048
+    H: 1776
+    W: 1776
     total_size: 1000000
   transforms:
-    H_pad: 2048
-    W_pad: 2048
-    num_patch: 250
-    size_patch: 20
+    H_pad: 1920
+    W_pad: 1920
+    Hv: 256
+    Wv: 256
+    sigma: 0.333
+    num_crop: 8
+    num_patch: 20
+    size_patch: 10
     angle_max: 360
     frac_shift_max: 0.1
-    downscale_factors: [2, 2]
     var_size_patch: 0.2
-    patch_size: 224
-    stride: 224
     sampling_fraction: null
     set:
       pad          : False
-      downscale    : False
       random_patch : False
       random_rotate: False
       random_shift : False
       instance_norm: False
+      polar_center_crop: False
+      batch_sampler    : False
 dist:
   backend               : nccl
   uses_unique_world_seed: true
@@ -81,7 +83,7 @@ model:
       initializer_range: 0.02
       layer_norm_eps   : !!float 1e-12
       drop_path_rate   : 0.0
-      image_size       : 1024
+      image_size       : 256
       out_features     : ['stage1', 'stage2', 'stage3', 'stage4']
       out_indices      : null
     from_scratch: false
