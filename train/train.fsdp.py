@@ -22,13 +22,15 @@ from datetime   import timedelta
 
 # -- peaknet specific imports
 # --- Dataset
-from peaknet.datasets.segmented_safetensor_dataset import (
+from peaknet.datasets.segmented_zarr_dataset import (
     SegmentedPeakNetDatasetConfig,
     SegmentedPeakNetDataset,
 )
 from peaknet.tensor_transforms import (
     Pad,
-    DownscaleLocalMean,
+    PolarCenterCrop,
+    MergeBatchPatchDims,
+    BatchSampler,
     RandomPatch,
     RandomRotate,
     RandomShift,
@@ -155,38 +157,41 @@ preempt_chkpt_saving_iterations = chkpt_config.get("preempt_chkpt_saving_iterati
 state_dict_type                 = chkpt_config.get("state_dict_type")
 
 # -- Dataset
-dataset_config       = config.get("dataset")
-path_dataset_train   = dataset_config.get("path_train")
-path_dataset_eval    = dataset_config.get("path_eval")
-drop_last_in_sampler = dataset_config.get("drop_last_in_sampler")
-drop_last_in_loader  = dataset_config.get("drop_last_in_loader")
-batch_size           = dataset_config.get("batch_size")
-seg_size             = dataset_config.get("seg_size")
-num_workers          = dataset_config.get("num_workers")
-pin_memory           = dataset_config.get("pin_memory")
-prefetch_factor      = dataset_config.get("prefetch_factor")
-debug_dataloading    = dataset_config.get("debug")
-cache_size           = dataset_config.get("cache_size")
-transforms_config    = dataset_config.get("transforms")
-num_patch            = transforms_config.get("num_patch")
-size_patch           = transforms_config.get("size_patch")
-frac_shift_max       = transforms_config.get("frac_shift_max")
-angle_max            = transforms_config.get("angle_max")
-var_size_patch       = transforms_config.get("var_size_patch")
-downscale_factors    = transforms_config.get("downscale_factors")
-H_pad                = transforms_config.get("H_pad")
-W_pad                = transforms_config.get("W_pad")
-patch_size           = transforms_config.get("patch_size")
-stride               = transforms_config.get("stride")
-detector_norm_params = transforms_config.get("norm")
-sampling_fraction    = transforms_config.get("sampling_fraction", None)
-set_transforms       = transforms_config.get("set")
-uses_pad             = set_transforms.get('pad')
-uses_downscale       = set_transforms.get('downscale')
-uses_random_patch    = set_transforms.get('random_patch')
-uses_random_rotate   = set_transforms.get('random_rotate')
-uses_random_shift    = set_transforms.get('random_shift')
-uses_instance_norm   = set_transforms.get('instance_norm')
+dataset_config         = config.get("dataset")
+path_dataset_train     = dataset_config.get("path_train")
+path_dataset_eval      = dataset_config.get("path_eval")
+drop_last_in_sampler   = dataset_config.get("drop_last_in_sampler")
+drop_last_in_loader    = dataset_config.get("drop_last_in_loader")
+batch_size             = dataset_config.get("batch_size")
+seg_size               = dataset_config.get("seg_size")
+num_workers            = dataset_config.get("num_workers")
+pin_memory             = dataset_config.get("pin_memory")
+prefetch_factor        = dataset_config.get("prefetch_factor")
+debug_dataloading      = dataset_config.get("debug")
+cache_size             = dataset_config.get("cache_size")
+transforms_config      = dataset_config.get("transforms")
+num_patch              = transforms_config.get("num_patch")
+size_patch             = transforms_config.get("size_patch")
+frac_shift_max         = transforms_config.get("frac_shift_max")
+angle_max              = transforms_config.get("angle_max")
+var_size_patch         = transforms_config.get("var_size_patch")
+patch_size             = transforms_config.get("patch_size")
+stride                 = transforms_config.get("stride")
+detector_norm_params   = transforms_config.get("norm")
+sampling_fraction      = transforms_config.get("sampling_fraction", None)
+H_pad                  = transforms_config.get("H_pad")
+W_pad                  = transforms_config.get("W_pad")
+Hv                     = transforms_config.get("Hv")
+Wv                     = transforms_config.get("Wv")
+sigma                  = transforms_config.get("sigma")
+num_crop               = transforms_config.get("num_crop")
+set_transforms         = transforms_config.get("set")
+uses_pad               = set_transforms.get("pad")
+uses_random_patch      = set_transforms.get("random_patch")
+uses_random_rotate     = set_transforms.get("random_rotate")
+uses_random_shift      = set_transforms.get("random_shift")
+uses_polar_center_crop = set_transforms.get("polar_center_crop")
+uses_batch_sampler     = set_transforms.get("batch_sampler")
 
 
 # -- Model
@@ -408,16 +413,20 @@ class NoTransform:
     def __call__(self, x, **kwargs):
         return x
 
+merges_batch_patch_dims = uses_polar_center_crop
 pre_transforms = (
     Pad(H_pad, W_pad) if uses_pad else NoTransform(),
-    DownscaleLocalMean(factors = downscale_factors) if uses_downscale else NoTransform(),
 )
 
 transforms = (
-    ## Norm(detector_norm_params),
-
-    ## Pad(H_pad, W_pad)                               if uses_pad           else NoTransform(),
-    ## DownscaleLocalMean(factors = downscale_factors) if uses_downscale     else NoTransform(),
+    PolarCenterCrop(
+        Hv       = Hv,
+        Wv       = Wv,
+        sigma    = sigma,
+        num_crop = num_crop,
+    ) if uses_polar_center_crop else NoTransform(),
+    MergeBatchPatchDims() if merges_batch_patch_dims else NoTransform(),
+    BatchSampler(sampling_fraction) if uses_batch_sampler else NoTransform(),
     RandomPatch(
         num_patch    = num_patch,
         H_patch      = size_patch,
@@ -431,10 +440,6 @@ transforms = (
         frac_y_shift_max = frac_shift_max,
         frac_x_shift_max = frac_shift_max,
     ) if uses_random_shift  else NoTransform(),
-    InstanceNorm() if uses_instance_norm else NoTransform(),
-
-    ## Patchify(patch_size, stride),
-    ## BatchSampler(sampling_fraction),
 )
 
 # -- Set up training set
