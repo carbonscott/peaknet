@@ -638,9 +638,12 @@ if dist_rank == 0:
 #  CRITERION (LOSS)
 # ----------------------------------------------------------------------- #
 print(f'[RANK {dist_rank}] Confguring criterion...')
-criterion = CategoricalFocalLoss(alpha       = focal_alpha,
-                                 gamma       = focal_gamma,
-                                 num_classes = seghead_num_classes,)
+criterion = CategoricalFocalLoss(
+    alpha       = focal_alpha,
+    gamma       = focal_gamma,
+    num_classes = seghead_num_classes,
+    device      = device,
+)
 
 
 # ----------------------------------------------------------------------- #

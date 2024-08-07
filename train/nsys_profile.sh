@@ -3,7 +3,7 @@
 RUNS_NSYS=0
 NUM_MPI_TASKS=4
 
-JOB=zarr0.0
+JOB=focal-0.0
 BATCH_SIZE=6
 H_PAD=1920
 W_PAD=1920
@@ -46,7 +46,7 @@ train_config.optim.fused=false \
 train_config.misc.monitors_dynamics=false \
 train_config.misc.compiles_model=false \
 train_config.misc.max_eval_iter=10 \
-train_config.misc.data_dump_on=true \
+train_config.misc.data_dump_on=false \
 train_config.lr_scheduler.warmup_iterations=10 \
 train_config.lr_scheduler.total_iterations=1000000 \
 train_config.logging.prefix=$JOB \

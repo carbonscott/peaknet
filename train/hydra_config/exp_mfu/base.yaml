@@ -55,7 +55,7 @@ logging:
 loss:
   grad_accum_steps: 4
   focal:
-    alpha: 1.0
+    alpha: [0.25, 0.75]
     gamma: 2.0
 lr_scheduler:
   min_lr                     : !!float 1e-7
