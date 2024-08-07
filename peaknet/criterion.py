@@ -7,10 +7,10 @@ import torch.nn.functional as F
 
 
 class CategoricalFocalLoss(nn.Module):
-    def __init__(self, alpha, gamma, num_classes = 3):
+    def __init__(self, alpha, gamma, num_classes = 3, device = 'cpu'):
         super().__init__()
 
-        self.alpha = alpha
+        self.alpha = torch.tensor(alpha, device = device)
         self.gamma = gamma
         self.num_classes = num_classes
 
@@ -33,13 +33,14 @@ class CategoricalFocalLoss(nn.Module):
         '''
         y_pred should be one-hot like.  y should use integer encoding.
         '''
-        alpha = self.alpha
-        gamma = self.gamma
+        alpha       = self.alpha
+        gamma       = self.gamma
+        num_classes = self.num_classes
 
         y_pred = y_pred.clamp(min=self.min_clamp, max=self.max_clamp)
 
         cross_entropy = -y * y_pred.log()
-        loss = alpha * (1 - y_pred)**gamma * cross_entropy
+        loss = alpha.view(1, num_classes, 1, 1) * (1 - y_pred)**gamma * cross_entropy
         loss = loss.sum(dim = 1)    # sum across the class (one-hot) dimension
 
         return loss
