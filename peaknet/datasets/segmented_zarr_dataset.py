@@ -15,6 +15,7 @@ from math import ceil
 from collections import OrderedDict
 
 from ..perf import Timer
+from ..tensor_transforms import InstanceNorm, NoTransform
 
 from itertools import islice
 
@@ -41,6 +42,7 @@ class SegmentedPeakNetDatasetConfig:
     dist_world_size: int
     device         : str
     dtype          : Optional[torch.dtype] = None
+    uses_norm      : bool = True
     perfs_runtime  : bool = False
 
 
@@ -57,6 +59,7 @@ class SegmentedPeakNetDataset(Dataset):
         self.seg_size        = config.seg_size
         self.dtype           = config.dtype
         self.transforms      = config.transforms
+        self.uses_norm       = config.uses_norm
         self.perfs_runtime   = config.perfs_runtime
         self.buffer_size     = config.buffer_size
         self.device          = config.device
@@ -72,6 +75,8 @@ class SegmentedPeakNetDataset(Dataset):
 
         self.item_generator  = None
         self.current_dataset = None
+
+        self.norm = InstanceNorm() if self.uses_norm else NoTransform
 
         return None
 
@@ -195,8 +200,8 @@ class SegmentedPeakNetDataset(Dataset):
 
         # Retrieve specific image and label tensors
         data = self.data_buffer[file_path]
-        image = data.get("images")[item_idx][None,]
-        label = data.get("labels")[item_idx][None,]
+        image = torch.from_numpy(data.get("images")[item_idx][None,None,])
+        label = torch.from_numpy(data.get("labels")[item_idx][None,None,])
 
         # Apply transformation to image and label at the same time...
         if self.transforms is not None:
@@ -211,6 +216,8 @@ class SegmentedPeakNetDataset(Dataset):
 
             # Binarize the label...
             label = label > 0.5
+
+        image = self.norm(image[None,])[0]
 
         return image, label    # (C, H, W)
 
