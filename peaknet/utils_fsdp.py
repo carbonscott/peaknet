@@ -418,7 +418,8 @@ class FullStateDictCheckpoint:
 
         dist.broadcast_object_list(object_list, src = 0)
         iter_state_saved = object_list[0]
-        iter_state = iter_state_saved
+        iter_state.clear()
+        iter_state.update(iter_state_saved)
 
     def save(self, rank, model, optimizer, lr_scheduler, iter_state, path_checkpoint):
         os.makedirs(path_checkpoint, exist_ok = True)
@@ -630,7 +631,8 @@ class ShardedStateDictCheckpoint:
 
         dist.broadcast_object_list(object_list, src = 0)
         iter_state_saved = object_list[0]
-        iter_state = iter_state_saved
+        iter_state.clear()
+        iter_state.update(iter_state_saved)
 
     def save(self, rank, model, optimizer, lr_scheduler, iter_state, path_checkpoint):
         os.makedirs(path_checkpoint, exist_ok = True)
