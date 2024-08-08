@@ -328,23 +328,6 @@ class FullStateDictCheckpoint:
         )
         model.load_state_dict(model_state_dict)
 
-    def load_optimizer_checkpoint(self, rank, model, optimizer, path_checkpoint_optim):
-        dist.barrier()
-
-        state_dict_config = self.state_dict_config
-        optim_dict_config = self.optim_dict_config
-
-        full_optim_state_dict = None
-
-        if rank == 0 or not optim_dict_config.rank0_only:
-            full_optim_state_dict = torch.load(path_checkpoint_optim)
-
-        sharded_optim_state_dict = FSDP.scatter_full_optim_state_dict(
-            full_optim_state_dict = full_optim_state_dict,
-            model = model,
-        )
-        optimizer.load_state_dict(sharded_optim_state_dict)
-
     def save_optimizer_checkpoint(self, rank, model, optimizer, path_checkpoint_optim):
         state_dict_config = self.state_dict_config
         optim_dict_config = self.optim_dict_config
