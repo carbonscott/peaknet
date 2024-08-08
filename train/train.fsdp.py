@@ -588,7 +588,7 @@ if uses_dist:
         forward_prefetch  = True,
         sharding_strategy = sharding_strategy,
         limit_all_gathers = True,
-        use_orig_params   = True,
+        use_orig_params   = False,
         device_id         = device,
     )
 
