@@ -153,6 +153,7 @@ dir_root_chkpt                  = chkpt_config.get("directory")
 fl_chkpt_prefix                 = chkpt_config.get("prefix")
 path_chkpt_prev                 = chkpt_config.get("path_chkpt_prev")
 chkpt_saving_iterations         = chkpt_config.get("chkpt_saving_iterations")
+preempt_metadata_path           = chkpt_config.get("preempt_metadata_path", os.environ.get('PREEMPT_METADATA_PATH', None))
 preempt_chkpt_saving_iterations = chkpt_config.get("preempt_chkpt_saving_iterations")
 state_dict_type                 = chkpt_config.get("state_dict_type")
 
@@ -687,7 +688,6 @@ if from_resume:
         # Optimizer, scheduler are loaded
         checkpointer.post_fsdp_load(dist_rank, model, optimizer, scheduler, iter_state, path_chkpt_prev)
 
-
         # Training state
         last_epoch = iter_state.get("epoch")
         last_seg   = iter_state.get("seg")
@@ -1034,7 +1034,6 @@ def estimate_mfu_per_iteration(num_flops_per_token, total_num_tokens_per_iterati
 #  TRAINING LOOP
 # ----------------------------------------------------------------------- #
 batch_input_shape = None
-preempt_metadata_path = os.environ.get('PREEMPT_METADATA_PATH', None)
 logger.debug(f'[RANK {dist_rank}] Ready for training loop...')
 iteration_counter = 0  # One iteration is one param update after one or a few forward/backward pass
 try:

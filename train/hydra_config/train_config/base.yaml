@@ -1,7 +1,8 @@
 checkpoint:
   state_dict_type                : full
   chkpt_saving_iterations        : 1
-  preempt_chkpt_saving_iterations: 1
+  preempt_metadata_path          : null
+  preempt_chkpt_saving_iterations: null
   directory                      : experiments/chkpts
   prefix                         : fsdp
   path_chkpt_prev                : null
