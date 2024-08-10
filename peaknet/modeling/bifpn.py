@@ -192,7 +192,7 @@ class BiFPNBlock(nn.Module):
             # Add skip connection to allow adaptive learning
             # [NOTE] If fused feature is not helpful, it's okay to bypass it
             # entirely through the skip connection.  ¯\_(ツ)_/¯
-            m_fused += p_high
+            m_fused = m_fused + p_high
 
             # Track the new feature map
             m[level_high] = m_fused
@@ -225,7 +225,7 @@ class BiFPNBlock(nn.Module):
             q_fused  = self.conv[f"q{level_low}"](q_fused)
 
             # Add skip connection to allow adaptive learning
-            q_fused += p_low
+            q_fused = q_fused + p_low
 
             # Track the new feature map
             q[level_low] = q_fused
