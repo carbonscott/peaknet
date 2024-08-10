@@ -6,7 +6,7 @@ from .bifpn_config import BiFPNBlockConfig, BiFPNConfig
 
 class DepthwiseSeparableConv2d(nn.Module):
     """
-    As the name suggests, it's a conv2d doen in two steps:
+    As the name suggests, it's a conv2d done in two steps:
     - Spatial only conv, no inter-channel communication.
     - Inter-channel communication, no spatial communication.
     """
