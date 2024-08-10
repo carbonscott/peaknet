@@ -166,20 +166,35 @@ class BiFPNBlock(nn.Module):
         # Fuse features from low resolution to high resolution (pathway M)...
         m = {}
         for idx, level_low in enumerate(range(max_level, min_level, -1)):
+            # Specify two feature maps for fusion
             level_high = level_low - 1
             m_low   = p[level_low ] if idx == 0 else m[level_low]
             p_high  = p[level_high]
 
-            w1, w2 = self.w_m[idx]
+            # Fusion...
+            # ...Upscaling
             orig_dtype = m_low.dtype
-            m_low_up = F.interpolate(m_low.to(torch.float32),
-                                     scale_factor  = self.config.up_scale_factor,
-                                     mode          = 'bilinear',
-                                     align_corners = False).to(orig_dtype)
+            m_low_up = F.interpolate(
+                m_low.to(torch.float32),
+                scale_factor  = self.config.up_scale_factor,
+                mode          = 'bilinear',
+                align_corners = False
+            ).to(orig_dtype)
+
+            # ...Normalized weighted sum with learnable summing weights
+            w1, w2 = self.w_m[idx]
             m_fused  = w1 * p_high + w2 * m_low_up
             m_fused /= (w1 + w2 + self.config.fusion.eps)
+
+            # ...Pass through learnable layer to refine and produce better features
             m_fused  = self.conv[f"m{level_high}"](m_fused)
 
+            # Add skip connection to allow adaptive learning
+            # [NOTE] If fused feature is not helpful, it's okay to bypass it
+            # entirely through the skip connection.  ¯\_(ツ)_/¯
+            m_fused += p_high
+
+            # Track the new feature map
             m[level_high] = m_fused
 
         # ___/ Stage Q \___
@@ -191,18 +206,32 @@ class BiFPNBlock(nn.Module):
             m_low  = m[level_low ] if level_low < max_level else p[level_low ]
             p_low  = p[level_low ]
 
-            w1, w2, w3 = self.w_q[idx]
+            # Fusion
+            # ...Downscaling
             orig_dtype = q_high.dtype
-            q_high_up = F.interpolate(q_high.to(torch.float32),
-                                      scale_factor  = self.config.down_scale_factor,
-                                      mode          = 'bilinear',
-                                      align_corners = False).to(orig_dtype)
-            q_fused  = w1 * p_low + w2 * m_low + w3 * q_high_up
+            q_high_down = F.interpolate(
+                q_high.to(torch.float32),
+                scale_factor  = self.config.down_scale_factor,
+                mode          = 'bilinear',
+                align_corners = False
+            ).to(orig_dtype)
+
+            # ...Normalized weighted sum with learnable summing weights
+            w1, w2, w3 = self.w_q[idx]
+            q_fused  = w1 * p_low + w2 * m_low + w3 * q_high_down
             q_fused /= (w1 + w2 + w3 + self.config.fusion.eps)
+
+            # ...Pass through learnable layer to refine and produce better features
             q_fused  = self.conv[f"q{level_low}"](q_fused)
 
-            if idx == 0: q[level_high] = q_high
+            # Add skip connection to allow adaptive learning
+            q_fused += p_low
+
+            # Track the new feature map
             q[level_low] = q_fused
+
+            # Track the highest level q feature
+            if idx == 0: q[level_high] = q_high
 
         return [ q[level] for level in range(min_level, min_level + num_levels) ]
 
