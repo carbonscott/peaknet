@@ -118,7 +118,7 @@ class BiFPNBlock(nn.Module):
                                          out_channels = num_features,
                                          bias         = False),
                 BiFPNLayerNorm(normalized_shape = (num_features,)),
-                nn.ReLU(),
+                nn.GELU(),
             )
             for level in range(min_level, max_level)
         })
@@ -131,7 +131,7 @@ class BiFPNBlock(nn.Module):
                                          out_channels = num_features,
                                          bias         = False),
                 BiFPNLayerNorm(normalized_shape = (num_features,)),
-                nn.ReLU(),
+                nn.GELU(),
             )
             for level in range(min_level + 1, max_level + 1)
         })
@@ -296,7 +296,7 @@ class BiFPNBlockEDU(nn.Module):
                 nn.BatchNorm2d(num_features = num_features,
                                eps          = CONFIG.BIFPN.BN.EPS,
                                momentum     = CONFIG.BIFPN.BN.MOMENTUM),
-                nn.ReLU(),
+                nn.GELU(),
             )
             for level in (6, 5, 4, 3)
         })
@@ -310,7 +310,7 @@ class BiFPNBlockEDU(nn.Module):
                 nn.BatchNorm2d(num_features = num_features,
                                eps          = CONFIG.BIFPN.BN.EPS,
                                momentum     = CONFIG.BIFPN.BN.MOMENTUM),
-                nn.ReLU(),
+                nn.GELU(),
             )
             for level in (4, 5, 6, 7)
         })
