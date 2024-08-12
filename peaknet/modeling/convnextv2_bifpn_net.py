@@ -161,12 +161,10 @@ class PeakNet(nn.Module):
 
         self.max_scale_factor = max_scale_factor
 
-        self._init_weights()
-
         return None
 
 
-    def _init_weights(self):
+    def init_weights(self):
         # Backbone has its own _init_weights
         self.backbone.apply(self.backbone._init_weights)
 
