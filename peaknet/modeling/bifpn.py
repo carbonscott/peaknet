@@ -52,6 +52,16 @@ class DepthwiseSeparableConv2d(nn.Module):
                                         dtype        = dtype)
 
 
+    def _init_weights(self):
+        nn.init.kaiming_uniform_(self.depthwise_conv.weight, mode='fan_in', nonlinearity='relu')
+        if self.depthwise_conv.bias is not None:
+            nn.init.zeros_(self.depthwise_conv.bias)
+
+        nn.init.kaiming_uniform_(self.pointwise_conv.weight, mode='fan_out', nonlinearity='relu')
+        if self.pointwise_conv.bias is not None:
+            nn.init.zeros_(self.pointwise_conv.bias)
+
+
     def forward(self, x):
         x = self.depthwise_conv(x)
         x = self.pointwise_conv(x)
@@ -71,6 +81,10 @@ class BiFPNLayerNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(normalized_shape))
         self.bias   = nn.Parameter(torch.zeros(normalized_shape))
         self.eps    = eps
+
+    def _init_weights(self):
+        nn.init.ones_(self.weight)
+        nn.init.zeros_(self.bias)
 
     def forward(self, x):
         return F.layer_norm(x.permute(0, 2, 3, 1), self.normalized_shape, self.weight, self.bias, self.eps).permute(0, 3, 1, 2)
@@ -149,6 +163,20 @@ class BiFPNBlock(nn.Module):
         # Keep these numbers as attributes...
         self.min_level  = min_level
         self.max_level  = max_level
+
+
+    def _init_weights(self):
+        # Initialize fusion weights
+        nn.init.constant_(self.w_m, 1e-4)
+        nn.init.constant_(self.w_q, 1e-4)
+
+        # Initialize DepthwiseSeparableConv2d and BiFPNLayerNorm in conv layers
+        for module in self.conv.values():
+            for layer in module:
+                if isinstance(layer, DepthwiseSeparableConv2d):
+                    layer._init_weights()
+                elif isinstance(layer, BiFPNLayerNorm):
+                    layer._init_weights()
 
 
     def forward(self, x):
@@ -258,6 +286,11 @@ class BiFPN(nn.Module):
             BiFPNBlock(config = self.config.block)
             for block_idx in range(num_blocks)
         ])
+
+
+    def _init_weights(self):
+        for block in self.blocks:
+            block._init_weights()
 
 
     def forward(self, x):

@@ -38,7 +38,7 @@ class SegLateralLayer(nn.Module):
                           kernel_size  = 3,
                           padding      = 1,),
                 nn.GroupNorm(num_groups, out_channels),
-                nn.ReLU(),
+                nn.GELU(),
             )
             for idx in range(num_layers)
         ])
@@ -161,7 +161,40 @@ class PeakNet(nn.Module):
 
         self.max_scale_factor = max_scale_factor
 
+        self._init_weights()
+
         return None
+
+
+    def _init_weights(self):
+        # Backbone has its own _init_weights
+        self.backbone._init_weights()
+
+        # Initialize backbone_to_bifpn
+        for m in self.backbone_to_bifpn:
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_uniform_(m.weight, mode='fan_in', nonlinearity='linear')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+        # BiFPN has its own _init_weights
+        self.bifpn._init_weights()
+
+        # Initialize seg_lateral_layers
+        for layer in self.seg_lateral_layers:
+            for m in layer.modules():
+                if isinstance(m, nn.Conv2d):
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.GroupNorm):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+
+        # Initialize head_segmask
+        nn.init.kaiming_normal_(self.head_segmask.weight, mode='fan_in', nonlinearity='linear')
+        if self.head_segmask.bias is not None:
+            nn.init.constant_(self.head_segmask.bias, 0)
 
 
     ## def estimate_output_channels(self):
