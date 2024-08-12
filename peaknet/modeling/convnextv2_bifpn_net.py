@@ -168,7 +168,7 @@ class PeakNet(nn.Module):
 
     def _init_weights(self):
         # Backbone has its own _init_weights
-        self.backbone._init_weights()
+        self.backbone.apply(self.backbone._init_weights)
 
         # Initialize backbone_to_bifpn
         for m in self.backbone_to_bifpn:
