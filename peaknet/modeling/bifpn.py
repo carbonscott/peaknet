@@ -2,7 +2,46 @@ import torch
 import torch.nn            as nn
 import torch.nn.functional as F
 
+import math
+
 from .bifpn_config import BiFPNBlockConfig, BiFPNConfig
+
+def variance_scaling_initializer(tensor, scale=1.0, mode='fan_in', distribution='truncated_normal'):
+    """
+    It's a near copy and paste from the TF implementation:
+    https://github.com/keras-team/keras/blob/f6c4ac55692c132cd16211f4877fac6dbeead749/keras/src/initializers/random_initializers.py#L273
+    """
+    fan_in, fan_out = nn.init._calculate_fan_in_and_fan_out(tensor)
+
+    if mode == 'fan_in':
+        scale /= max(1., fan_in)
+    elif mode == 'fan_out':
+        scale /= max(1., fan_out)
+    else:  # 'fan_avg'
+        scale /= max(1., (fan_in + fan_out) / 2.)
+
+    if distribution == 'truncated_normal':
+        std = math.sqrt(scale) / .87962566103423978  # Constant from TF implementation
+                                                     # The magic number is probably caused by
+                                                     # truncating random values outside [-2, 2]:
+                                                     # data = torch.empty(n_samples).normal_()
+                                                     # data[(-2 <= data) & (data <= 2)].var().sqrt()
+        with torch.no_grad():
+            # Fold distribution to be within 2 sigma.  Basically, an in-place operation of
+            # tensor = tensor % 2
+            # tensor = tensor * std
+            tensor.normal_().fmod_(2).mul_(std).add_(0)
+    elif distribution == 'normal':
+        std = math.sqrt(scale)
+        with torch.no_grad():
+            tensor.normal_(0, std)
+    else:
+        limit = math.sqrt(3.0 * scale)
+        with torch.no_grad():
+            tensor.uniform_(-limit, limit)
+
+    return tensor
+
 
 class DepthwiseSeparableConv2d(nn.Module):
     """
@@ -53,6 +92,7 @@ class DepthwiseSeparableConv2d(nn.Module):
 
 
     def _init_weights(self):
+        """ """
         nn.init.kaiming_uniform_(self.depthwise_conv.weight, mode='fan_in', nonlinearity='relu')
         if self.depthwise_conv.bias is not None:
             nn.init.zeros_(self.depthwise_conv.bias)
@@ -295,154 +335,3 @@ class BiFPN(nn.Module):
 
     def forward(self, x):
         return self.blocks(x)
-
-
-
-
-#####################################################################
-# RAW BIFPN IMPLEMENTATION BELOW IS FOR LEARNING/DEBUGGING PURPOSES #
-#####################################################################
-'''
-class BiFPNBlockEDU(nn.Module):
-    """
-    !!!
-    THIS CLASS IS MEANT FOR EDUCATING MYSELF ON BIFPN.  ALL LAYERS ARE
-    HARD-CODED.
-    !!!
-
-    One BiFPN block takes feature maps at five different scales:
-    (p3, p4, p5, p6, p7).
-
-    Notice that the input to BiFPNBlock should have the same channel size, 
-    which can be achieved with a conv layer in the upstream.
-    """
-
-    def __init__(self, num_features = 64):
-        super().__init__()
-
-        # Create conv2d layers for fusion stage M...
-        m_conv = nn.ModuleDict({
-            f"m{level}" : nn.Sequential(
-                DepthwiseSeparableConv2d(in_channels  = num_features,
-                                         out_channels = num_features,
-                                         bias         = False),
-                nn.BatchNorm2d(num_features = num_features,
-                               eps          = CONFIG.BIFPN.BN.EPS,
-                               momentum     = CONFIG.BIFPN.BN.MOMENTUM),
-                nn.GELU(),
-            )
-            for level in (6, 5, 4, 3)
-        })
-
-        # Create conv2d layers for fusion stage Q...
-        q_conv = nn.ModuleDict({
-            f"q{level}" : nn.Sequential(
-                DepthwiseSeparableConv2d(in_channels  = num_features,
-                                         out_channels = num_features,
-                                         bias         = False),
-                nn.BatchNorm2d(num_features = num_features,
-                               eps          = CONFIG.BIFPN.BN.EPS,
-                               momentum     = CONFIG.BIFPN.BN.MOMENTUM),
-                nn.GELU(),
-            )
-            for level in (4, 5, 6, 7)
-        })
-
-        self.conv = nn.ModuleDict()
-        self.conv.update(m_conv)
-        self.conv.update(q_conv)
-
-        # Define the weights used in fusion
-        self.w_m = nn.Parameter(torch.randn(4, 2))    # Two-component fusion at stage M
-        self.w_q = nn.Parameter(torch.randn(4, 3))    # Three-component fusion at stage Q
-
-
-    def forward(self, x):
-        # Unpack the feature maps at five different scales...
-        p3, p4, p5, p6, p7 = x    # (B, C, [H], [W])
-
-        # ___/ Stage M \___
-        # Fuse M6 = P7 + P6
-        w1, w2 = self.w_m[0]
-        p7_up = F.interpolate(p7.to(torch.float32),
-                              scale_factor  = CONFIG.BIFPN.UP_SCALE_FACTOR,
-                              mode          = 'bilinear',
-                              align_corners = False).to(torch.bfloat16)
-        m6  = w1 * p6 + w2 * p7_up
-        m6 /= (w1 + w2 + CONFIG.BIFPN.FUSION.EPS)
-        m6  = self.conv.m6(m6)
-
-        # Fuse M5 = M6 + P5
-        w1, w2 = self.w_m[1]
-        m6_up = F.interpolate(m6.to(torch.float32),
-                              scale_factor  = CONFIG.BIFPN.UP_SCALE_FACTOR,
-                              mode          = 'bilinear',
-                              align_corners = False).to(torch.bfloat16)
-        m5  = w1 * p5 + w2 * m6_up
-        m5 /= (w1 + w2 + CONFIG.BIFPN.FUSION.EPS)
-        m5  = self.conv.m5(m5)
-
-        # Fuse M4 = M5 + P4
-        w1, w2 = self.w_m[2]
-        m5_up = F.interpolate(m5.to(torch.float32),
-                              scale_factor  = CONFIG.BIFPN.UP_SCALE_FACTOR,
-                              mode          = 'bilinear',
-                              align_corners = False).to(torch.bfloat16)
-        m4  = w1 * p4 + w2 * m5_up
-        m4 /= (w1 + w2 + CONFIG.BIFPN.FUSION.EPS)
-        m4  = self.conv.m4(m4)
-
-        # Fuse M3 = M4 + P3
-        w1, w2 = self.w_m[3]
-        m4_up = F.interpolate(m4.to(torch.float32),
-                              scale_factor  = CONFIG.BIFPN.UP_SCALE_FACTOR,
-                              mode          = 'bilinear',
-                              align_corners = False).to(torch.bfloat16)
-        m3  = w1 * p3 + w2 * m4_up
-        m3 /= (w1 + w2 + CONFIG.BIFPN.FUSION.EPS)
-        m3  = self.conv.m3(m3)
-
-        # ___/ Stage Q \___
-        # Fuse Q4 = Q3 + M4 + P4
-        w1, w2, w3 = self.w_q[0]
-        q3 = m3
-        q3_up = F.interpolate(q3.to(torch.float32),
-                              scale_factor  = CONFIG.BIFPN.DOWN_SCALE_FACTOR,
-                              mode          = 'bilinear',
-                              align_corners = False).to(torch.bfloat16)
-        q4  = w1 * p4 + w2 * m4 + w3 * q3_up
-        q4 /= (w1 + w2 + w3 + CONFIG.BIFPN.FUSION.EPS)
-        q4  = self.conv.q4(q4)
-
-        # Fuse Q5 = Q4 + M5 + P5
-        w1, w2, w3 = self.w_q[1]
-        q4_up = F.interpolate(q4.to(torch.float32),
-                              scale_factor  = CONFIG.BIFPN.DOWN_SCALE_FACTOR,
-                              mode          = 'bilinear',
-                              align_corners = False).to(torch.bfloat16)
-        q5 = w1 * p5 + w2 * m5 + w3 * q4_up
-        q5 /= (w1 + w2 + w3 + CONFIG.BIFPN.FUSION.EPS)
-        q5  = self.conv.q5(q5)
-
-        # Fuse Q6 = Q5 + M6 + P6
-        w1, w2, w3 = self.w_q[2]
-        q5_up = F.interpolate(q5.to(torch.float32),
-                              scale_factor  = CONFIG.BIFPN.DOWN_SCALE_FACTOR,
-                              mode          = 'bilinear',
-                              align_corners = False).to(torch.bfloat16)
-        q6 = w1 * p6 + w2 * m6 + w3 * q5_up
-        q6 /= (w1 + w2 + w3 + CONFIG.BIFPN.FUSION.EPS)
-        q6  = self.conv.q6(q6)
-
-        # Fuse Q7 = Q6 + P7
-        w1, w2, w3 = self.w_q[3]
-        q6_up = F.interpolate(q6.to(torch.float32),
-                              scale_factor  = CONFIG.BIFPN.DOWN_SCALE_FACTOR,
-                              mode          = 'bilinear',
-                              align_corners = False).to(torch.bfloat16)
-        q7 = w1 * p7 + w2 * p7 + w3 * q6_up
-        q7 /= (w1 + w2 + w3 + CONFIG.BIFPN.FUSION.EPS)
-        q7  = self.conv.q7(q7)
-
-        return q3, q4, q5, q6, q7
-'''
