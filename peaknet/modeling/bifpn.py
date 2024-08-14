@@ -24,6 +24,7 @@ def variance_scaling_initializer(tensor, scale=1.0, mode='fan_in', distribution=
         std = math.sqrt(scale) / .87962566103423978  # Constant from TF implementation
                                                      # The magic number is probably caused by
                                                      # truncating random values outside [-2, 2]:
+                                                     # std in this region becomes
                                                      # data = torch.empty(n_samples).normal_()
                                                      # data[(-2 <= data) & (data <= 2)].var().sqrt()
         with torch.no_grad():
