@@ -68,10 +68,10 @@ class SegLateralLayer(nn.Module):
 class SegHeadConfig:
     up_scale_factor: List[int] = field(
         default_factory = lambda : [
-            4,  # stage0
-            8,  # stage1
-            16, # stage2
-            32, # stage3
+            4,  # stage1
+            8,  # stage2
+            16, # stage3
+            32, # stage4
         ]
     )
     num_groups           : int  = 32
@@ -104,7 +104,6 @@ class PeakNetConfig:
     )
     bifpn             : BiFPNConfig              = BiFPN.get_default_config()
     seg_head          : SegHeadConfig            = SegHeadConfig()
-    ## channels_in_stages: Optional[Dict[str, int]] = None  # [96, 192, 384, 768]
 
 
 class PeakNet(nn.Module):
@@ -153,11 +152,29 @@ class PeakNet(nn.Module):
                                       padding      = 0,)
 
         if self.config.seg_head.uses_learned_upsample:
-            self.head_upsample_layer = nn.ConvTranspose2d(in_channels  = self.config.seg_head.num_classes,
-                                                          out_channels = self.config.seg_head.num_classes,
-                                                          kernel_size  = 6,
-                                                          stride       = 4,
-                                                          padding      = 1,)
+            # [NOTE] output_size = (input_size - 1) * stride - 2 * padding + kernel_size + output_padding
+            # - stride  := max_scale_factor
+            # - padding := 1
+            # - kernel  := stride+2
+            self.head_upsample_layer = nn.Sequential(
+                nn.ConvTranspose2d(
+                    in_channels    = self.config.seg_head.num_classes,
+                    out_channels   = self.config.seg_head.num_classes,
+                    kernel_size    = max_scale_factor+2,
+                    stride         = max_scale_factor,
+                    padding        = 1,
+                ),
+                nn.GroupNorm(1, self.config.seg_head.num_classes),
+                nn.GELU(),
+            )
+
+        # Refine the final prediction
+        self.final_conv = nn.Conv2d(
+            self.config.seg_head.num_classes,
+            self.config.seg_head.num_classes,
+            kernel_size=3,
+            padding=1
+        )
 
         self.max_scale_factor = max_scale_factor
 
@@ -194,58 +211,21 @@ class PeakNet(nn.Module):
         if self.head_segmask.bias is not None:
             nn.init.constant_(self.head_segmask.bias, 0)
 
+        # Initialize head_upsample_layer if it exists
+        if self.config.seg_head.uses_learned_upsample:
+            for m in self.head_upsample_layer:
+                if isinstance(m, nn.ConvTranspose2d):
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.GroupNorm):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
 
-    ## def estimate_output_channels(self):
-    ##     """ Estimate the output channels for an input backbone.
-
-    ##         Only rank 0 will perform the calculation.
-
-    ##         The output will be saved under the home directory.
-    ##     """
-    ##     rank = int(os.environ.get("RANK", 0))
-
-    ##     cache_dir  = os.getcwd()
-    ##     cache_dir  = os.path.join(cache_dir, '.cache/peaknet')
-    ##     cache_file = os.path.join(cache_dir, f'output_channels.pt')
-
-    ##     if not os.path.exists(cache_file):
-    ##         if rank == 0:
-    ##             print(f"[RANK {rank}] Creating cache for building the model...")
-    ##             os.makedirs(cache_dir, exist_ok = True)
-
-    ##             device = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
-
-    ##             # Create dummy data, so the exact H and W don't matter
-    ##             B, C, H, W = 2, 1, 1*(2**4)*4, 1*(2**4)*4
-    ##             batch_input = torch.rand(B, C, H, W, dtype = torch.float, device = device)
-
-    ##             model = self.backbone
-    ##             model.to(device)
-    ##             model.eval()
-    ##             with torch.no_grad():
-    ##                 stage_feature_maps = model(batch_input).feature_maps
-    ##             model.train()
-
-    ##             # Explicitly delete the model and input tensor
-    ##             del model
-    ##             del batch_input
-    ##             if device != 'cpu':
-    ##                 torch.cuda.empty_cache()
-
-    ##             output_channels = { f"stage{enum_idx}" : stage_feature_map.shape[1] for enum_idx, stage_feature_map in enumerate(stage_feature_maps) }    # (B, C, H, W)
-
-    ##             torch.save(output_channels, cache_file)
-    ##         else:
-    ##             print(f"[RANK {rank}] Waiting for model building by the main rank...")
-
-    ##     if dist.is_initialized():
-    ##         dist.barrier()
-
-    ##     if os.path.exists(cache_file):
-    ##         print(f"[RANK {rank}] Loading the model building cache...")
-    ##         return torch.load(cache_file, map_location='cpu')    # CPU is fine for loading python dict
-
-    ##     raise RuntimeError(f"Cache file '{cache_file}' not found. This should not happen after synchronization barrier.")
+        # Initialize final_conv
+        nn.init.kaiming_normal_(self.final_conv.weight, mode='fan_out', nonlinearity='linear')
+        if self.final_conv.bias is not None:
+            nn.init.constant_(self.final_conv.bias, 0)
 
 
     def extract_features(self, x):
@@ -282,7 +262,7 @@ class PeakNet(nn.Module):
         # Make prediction...
         pred_map = self.head_segmask(fmap_acc)
 
-        # Upscale...
+        # Direct upscale as skip connection
         pred_map_dtype = pred_map.dtype
         pred_map = F.interpolate(
             pred_map.to(torch.float32),
@@ -290,8 +270,15 @@ class PeakNet(nn.Module):
             mode          = 'bilinear',
             align_corners = False
         ).to(pred_map_dtype) \
-        if not self.config.seg_head.uses_learned_upsample else \
-        self.head_upsample_layer(pred_map)
+
+        if self.config.seg_head.uses_learned_upsample:
+            # Learnable upscale
+            residual_map = self.head_upsample_layer(pred_map)
+
+            # Skip connection
+            pred_map = pred_map + residual_map
+
+        pred_map = self.final_conv(pred_map)
 
         return pred_map
 
