@@ -264,7 +264,7 @@ class PeakNet(nn.Module):
 
         # Direct upscale as skip connection
         pred_map_dtype = pred_map.dtype
-        pred_map = F.interpolate(
+        skip_map = F.interpolate(
             pred_map.to(torch.float32),
             scale_factor  = self.max_scale_factor,
             mode          = 'bilinear',
@@ -276,7 +276,9 @@ class PeakNet(nn.Module):
             residual_map = self.head_upsample_layer(pred_map)
 
             # Skip connection
-            pred_map = pred_map + residual_map
+            pred_map = skip_map + residual_map
+        else:
+            pred_map = skip_map
 
         pred_map = self.final_conv(pred_map)
 
