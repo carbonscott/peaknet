@@ -94,11 +94,11 @@ class DepthwiseSeparableConv2d(nn.Module):
 
     def _init_weights(self):
         """ [TODO] Use variance scaling. """
-        nn.init.kaiming_uniform_(self.depthwise_conv.weight, mode='fan_in', nonlinearity='relu')
+        variance_scaling_initializer(self.depthwise_conv.weight)
         if self.depthwise_conv.bias is not None:
             nn.init.zeros_(self.depthwise_conv.bias)
 
-        nn.init.kaiming_uniform_(self.pointwise_conv.weight, mode='fan_out', nonlinearity='relu')
+        variance_scaling_initializer(self.pointwise_conv.weight)
         if self.pointwise_conv.bias is not None:
             nn.init.zeros_(self.pointwise_conv.bias)
 
@@ -296,7 +296,7 @@ class BiFPNBlock(nn.Module):
 
             # ...Normalized weighted sum with learnable summing weights
             mask = self.w_q_mask[idx]
-            w1, w2, w3 = self.w_q[idx][mask].relu()  # Keep weights positive for quick and dirty weighted sum
+            w1, w2, w3 = (self.w_q[idx] * mask).relu()  # Keep weights positive for quick and dirty weighted sum
             q_fused  = w1 * p_low + w2 * m_low + w3 * q_high_down
             q_fused /= (w1 + w2 + w3 + self.config.fusion.eps)
 
