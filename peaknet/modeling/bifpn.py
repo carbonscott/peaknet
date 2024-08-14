@@ -201,6 +201,11 @@ class BiFPNBlock(nn.Module):
         self.w_m = nn.Parameter(torch.randn(num_level_stage_m, 2))    # Two-component fusion at stage M
         self.w_q = nn.Parameter(torch.randn(num_level_stage_q, 3))    # Three-component fusion at stage Q
 
+        # Create a buffer (will go into state_dict) to render some variables unlearnable
+        w_q_mask = torch.ones_like(self.w_q, dtype = torch.bool)
+        w_q_mask[0, 0] = False
+        self.register_buffer('w_q_mask', w_q_mask)
+
         # Keep these numbers as attributes...
         self.min_level  = min_level
         self.max_level  = max_level
@@ -286,7 +291,8 @@ class BiFPNBlock(nn.Module):
             ).to(orig_dtype)
 
             # ...Normalized weighted sum with learnable summing weights
-            w1, w2, w3 = self.w_q[idx]
+            mask = self.w_q_mask[idx]
+            w1, w2, w3 = self.w_q[idx][mask]
             q_fused  = w1 * p_low + w2 * m_low + w3 * q_high_down
             q_fused /= (w1 + w2 + w3 + self.config.fusion.eps)
 
