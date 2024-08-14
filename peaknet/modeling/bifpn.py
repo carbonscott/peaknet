@@ -93,7 +93,7 @@ class DepthwiseSeparableConv2d(nn.Module):
 
 
     def _init_weights(self):
-        """ """
+        """ [TODO] Use variance scaling. """
         nn.init.kaiming_uniform_(self.depthwise_conv.weight, mode='fan_in', nonlinearity='relu')
         if self.depthwise_conv.bias is not None:
             nn.init.zeros_(self.depthwise_conv.bias)
