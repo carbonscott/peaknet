@@ -203,7 +203,7 @@ class BiFPNBlock(nn.Module):
 
         # Create a buffer (will go into state_dict) to render some variables unlearnable
         w_q_mask = torch.ones_like(self.w_q, dtype = torch.bool)
-        w_q_mask[0, 0] = False
+        w_q_mask[-1, 0] = False  # The lowest resolution level
         self.register_buffer('w_q_mask', w_q_mask)
 
         # Keep these numbers as attributes...
@@ -213,8 +213,12 @@ class BiFPNBlock(nn.Module):
 
     def _init_weights(self):
         # Initialize fusion weights
-        nn.init.constant_(self.w_m, 1e-4)
-        nn.init.constant_(self.w_q, 1e-4)
+        nn.init.constant_(self.w_m, 1.0)
+        nn.init.constant_(self.w_q, 1.0)
+
+        # Zero the fusion weight associated with p_low at the lowest resolution
+        with torch.no_grad():
+            self.w_q[-1, 0] = 0.0
 
         # Initialize DepthwiseSeparableConv2d and BiFPNLayerNorm in conv layers
         for module in self.conv.values():
@@ -256,7 +260,7 @@ class BiFPNBlock(nn.Module):
             ).to(orig_dtype)
 
             # ...Normalized weighted sum with learnable summing weights
-            w1, w2 = self.w_m[idx]
+            w1, w2 = self.w_m[idx].relu()  # Keep weights positive for quick and dirty weighted sum
             m_fused  = w1 * p_high + w2 * m_low_up
             m_fused /= (w1 + w2 + self.config.fusion.eps)
 
@@ -292,7 +296,7 @@ class BiFPNBlock(nn.Module):
 
             # ...Normalized weighted sum with learnable summing weights
             mask = self.w_q_mask[idx]
-            w1, w2, w3 = self.w_q[idx][mask]
+            w1, w2, w3 = self.w_q[idx][mask].relu()  # Keep weights positive for quick and dirty weighted sum
             q_fused  = w1 * p_low + w2 * m_low + w3 * q_high_down
             q_fused /= (w1 + w2 + w3 + self.config.fusion.eps)
 
