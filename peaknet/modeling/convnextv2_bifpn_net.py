@@ -43,17 +43,10 @@ class SegLateralLayer(nn.Module):
             for idx in range(num_layers)
         ])
 
-        # Creating a gating mask
-        self.channel_gating_layer = nn.Sequential(
-            nn.Conv2d(out_channels, out_channels, kernel_size = 1),
-            nn.Sigmoid()
-        )
-
         self.base_scale_factor = base_scale_factor
 
 
     def forward(self, x):
-        channel_gating_mask = []
         for layer in self.layers:
             # Conv3x3...
             x = layer(x)
@@ -67,10 +60,6 @@ class SegLateralLayer(nn.Module):
                     mode          = 'bilinear',
                     align_corners = False
                 ).to(x_dtype)
-            channel_gating_mask.append(self.channel_gating_layer(x))
-
-        # Apply the channel gates
-        x = torch.sum(torch.stack([gate * layer_out for gate, layer_out in zip(channel_gating_mask, self.layers)]), dim=0)
 
         return x
 
@@ -169,23 +158,13 @@ class PeakNet(nn.Module):
             # - kernel  := stride+2
             self.head_upsample_layer = nn.Sequential(
                 nn.ConvTranspose2d(
-                    in_channels    = self.config.seg_head.num_classes,
+                    in_channels    = self.config.seg_head.out_channels,
                     out_channels   = self.config.seg_head.num_classes,
                     kernel_size    = max_scale_factor+2,
                     stride         = max_scale_factor,
                     padding        = 1,
                 ),
-                nn.GroupNorm(1, self.config.seg_head.num_classes),
-                nn.GELU(),
             )
-
-        # Refine the final prediction
-        self.final_conv = nn.Conv2d(
-            self.config.seg_head.num_classes,
-            self.config.seg_head.num_classes,
-            kernel_size=3,
-            padding=1
-        )
 
         self.max_scale_factor = max_scale_factor
 
@@ -233,11 +212,6 @@ class PeakNet(nn.Module):
                     nn.init.constant_(m.weight, 1)
                     nn.init.constant_(m.bias, 0)
 
-        # Initialize final_conv
-        nn.init.kaiming_normal_(self.final_conv.weight, mode='fan_out', nonlinearity='linear')
-        if self.final_conv.bias is not None:
-            nn.init.constant_(self.final_conv.bias, 0)
-
 
     def extract_features(self, x):
         # Calculate and save feature maps in multiple resolutions...
@@ -271,12 +245,12 @@ class PeakNet(nn.Module):
                 fmap_acc += fmap
 
         # Make prediction...
-        pred_map = self.head_segmask(fmap_acc)
+        pred_map_low = self.head_segmask(fmap_acc)
 
         # Direct upscale as skip connection
-        pred_map_dtype = pred_map.dtype
+        pred_map_dtype = pred_map_low.dtype
         skip_map = F.interpolate(
-            pred_map.to(torch.float32),
+            pred_map_low.to(torch.float32),
             scale_factor  = self.max_scale_factor,
             mode          = 'bilinear',
             align_corners = False
@@ -284,14 +258,12 @@ class PeakNet(nn.Module):
 
         if self.config.seg_head.uses_learned_upsample:
             # Learnable upscale
-            residual_map = self.head_upsample_layer(pred_map)
+            residual_map = self.head_upsample_layer(fmap_acc)
 
             # Skip connection
             pred_map = skip_map + residual_map
         else:
             pred_map = skip_map
-
-        pred_map = self.final_conv(pred_map)
 
         return pred_map
 
