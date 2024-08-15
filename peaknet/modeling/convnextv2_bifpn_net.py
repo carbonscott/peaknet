@@ -43,10 +43,17 @@ class SegLateralLayer(nn.Module):
             for idx in range(num_layers)
         ])
 
+        # Creating a gating mask
+        self.channel_gating_layer = nn.Sequential(
+            nn.Conv2d(out_channels, out_channels, kernel_size = 1),
+            nn.Sigmoid()
+        )
+
         self.base_scale_factor = base_scale_factor
 
 
     def forward(self, x):
+        channel_gating_mask = []
         for layer in self.layers:
             # Conv3x3...
             x = layer(x)
@@ -60,6 +67,10 @@ class SegLateralLayer(nn.Module):
                     mode          = 'bilinear',
                     align_corners = False
                 ).to(x_dtype)
+            channel_gating_mask.append(self.channel_gating_layer(x))
+
+        # Apply the channel gates
+        x = torch.sum(torch.stack([gate * layer_out for gate, layer_out in zip(channel_gating_mask, self.layers)]), dim=0)
 
         return x
 
