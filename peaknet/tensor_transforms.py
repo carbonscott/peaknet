@@ -317,6 +317,8 @@ class PolarCenterCrop:
 
         # -- Valid H and W
         B, C, H, W = img.shape
+        Hv = min(Hv, H)
+        Wv = min(Wv, W)
         H_valid = H - Hv
         W_valid = W - Wv
 
@@ -337,6 +339,10 @@ class PolarCenterCrop:
         # Rescale it to half image length
         cy *= H_valid/2
         cx *= W_valid/2
+
+        # Change the origin to the center of the input image
+        cy += H/2
+        cx += W/2
 
         # Calculate the top-left(tl) coordinates used for fancy indexing
         tly = cy - Hv//2  # (B, N)
