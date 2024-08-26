@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "peaknet"
+version = "23.05.08"
+description = "A neural network model finding Bragg peaks in SFX experiments."
+authors = ["Cong Wang <wangimagine@gmail.com>"]
+readme = "README.md"
+license = "MIT"
+keywords = ['SFX', 'X-ray', 'Neural network model']
+
+[project.urls]
+#Homepage = "https://example.com"
+#Documentation = "https://readthedocs.org"
+Repository = "https://github.com/carbonscott/peaknet"
+Issues = "https://github.com/carbonscott/peaknet/issues"
+#Changelog = "https://github.com/me/spam/blob/master/CHANGELOG.md"
+
+[tool.poetry.dependencies]
+python = ">=3.8"
+omegaconf = "^2.3.0"
+pyyaml = "^6.0.2"
+jinja2 = "^3.1.4"
+hydra-core = "^1.3.2"
+torch = ">=2.0"
+mpi4py = ">=3.1.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
