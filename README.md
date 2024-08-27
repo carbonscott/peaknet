@@ -32,6 +32,17 @@ pip uninstall peaknet
 pip install git+https://github.com/carbonscott/peaknet
 ```
 
+Note: Upgrading is via `git pull` if you have locally installed a git-clone.
+
+### Develop
+
+```
+pip install poetry
+poetry install # install into a poetry-managed venv
+poetry run pytest # run tests
+poetry add tqdm # add package
+```
+
 
 ## Run a job
 
