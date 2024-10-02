@@ -7,10 +7,10 @@ import torch.nn.functional as F
 
 
 class CategoricalFocalLoss(nn.Module):
-    def __init__(self, alpha, gamma, num_classes = 3, device = 'cpu'):
+    def __init__(self, alpha, gamma, num_classes = 3):
         super().__init__()
 
-        self.alpha = torch.tensor(alpha, device = device)
+        self.alpha = torch.tensor(alpha)
         self.gamma = gamma
         self.num_classes = num_classes
 
@@ -33,6 +33,10 @@ class CategoricalFocalLoss(nn.Module):
         '''
         y_pred should be one-hot like.  y should use integer encoding.
         '''
+        # Move alpha to device if it hasn't already???
+        if self.alpha.device != y_pred.device:
+            self.alpha = self.alpha.to(y_pred.device)
+
         alpha       = self.alpha
         gamma       = self.gamma
         num_classes = self.num_classes
