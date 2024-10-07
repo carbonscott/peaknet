@@ -98,12 +98,12 @@ class PeakNetConfig:
         out_features      = None,  # out_features = ['stage1', 'stage2', 'stage3', 'stage4']
         out_indices       = None,
     """
-    backbone: ConvNextV2Config = ConvNextV2Config(
+    backbone: ConvNextV2Config = field(default_factory=ConvNextV2Config(
         num_channels = 1,
         out_features = ['stage1', 'stage2', 'stage3', 'stage4'],
-    )
-    bifpn             : BiFPNConfig              = BiFPN.get_default_config()
-    seg_head          : SegHeadConfig            = SegHeadConfig()
+    ))
+    bifpn   : BiFPNConfig   = field(default_factory=BiFPN.get_default_config())
+    seg_head: SegHeadConfig = field(default_factory=SegHeadConfig())
 
 
 class PeakNet(nn.Module):
