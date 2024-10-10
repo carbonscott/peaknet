@@ -19,9 +19,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 class Pad:
-    def __init__(self, H, W):
+    def __init__(self, H, W, pad_style = 'center'):
         self.H = H
         self.W = W
+        self.pad_style = pad_style
 
 
     def calc_pad_width(self, img):
@@ -32,10 +33,18 @@ class Pad:
         dH_padded = max(H - H_img, 0)
         dW_padded = max(W - W_img, 0)
 
-        pad_width = (
-            dW_padded // 2, dW_padded - dW_padded // 2,    # -1 dimension (left, right)
-            dH_padded // 2, dH_padded - dH_padded // 2,    # -2 dimension (top, bottom)
-        )
+        if self.pad_style == 'center':
+            pad_width = (
+                dW_padded // 2, dW_padded - dW_padded // 2,    # -1 dimension (left, right)
+                dH_padded // 2, dH_padded - dH_padded // 2,    # -2 dimension (top, bottom)
+            )
+        elif self.pad_style == 'bottom-right':
+            pad_width = (
+                0, dW_padded,
+                0, dH_padded,
+            )
+        else:
+            raise ValueError("Invalid pad_style. Use 'center' or 'bottom-right'.")
 
         return pad_width
 
