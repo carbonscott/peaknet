@@ -296,6 +296,19 @@ class Norm:
 
 
 class InstanceNorm:
+    """
+    Implements Instance Normalization.
+
+    In this context, an "instance" refers to a single sample in the batch,
+    including all its channels and spatial dimensions. For a 4D input tensor
+    with shape (B, C, H, W):
+    - B is the batch dimension
+    - An instance is a 3D tensor with shape (C, H, W)
+
+    Instance Normalization normalizes each instance independently, computing
+    the mean and variance across all channels and spatial dimensions (C, H, W)
+    for each sample in the batch.
+    """
     def __init__(self, eps = 1e-6, checks_nan = True):
         self.eps = eps
         self.checks_nan = checks_nan
@@ -304,14 +317,12 @@ class InstanceNorm:
         if self.checks_nan and torch.isnan(img).any():
             logger.debug(f"NaN found in the input.")
 
-        B, C, H, W = img.size()
-        img_view = img.view(B, C, H*W)
-        mean = img_view.mean(dim=-1, keepdim=True)
-        var  = img_view.var (dim=-1, keepdim=True, correction=0)
+        mean = img.mean(dim=(-1,-2,-3), keepdim=True)
+        var  = img.var (dim=(-1,-2,-3), keepdim=True, correction=0)
 
-        img_norm = (img_view - mean) / torch.sqrt(var + self.eps)
+        img_norm = (img - mean) / torch.sqrt(var + self.eps)
 
-        return img_norm.view(B, C, H, W)
+        return img_norm
 
 
 class PolarCenterCrop:
