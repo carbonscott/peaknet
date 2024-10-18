@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import torchvision
-from torchvision.transforms.functional import rotate, normalize
+from torchvision.transforms.functional import rotate, normalize, crop
 
 import random
 
@@ -54,6 +54,54 @@ class Pad:
         img_padded = F.pad(img, pad_width, 'constant', 0)
 
         return img_padded
+
+
+class PadAndCrop:
+    """
+    A transformation class that crops input tensors to a specified size (H, W).
+
+    This class only affects the height (H) and width (W) dimensions of the input tensor,
+    leaving the batch (B) and channel (C) dimensions unchanged. It's designed to work
+    with tensors of shape (B, C, H, W) or (C, H, W).
+
+    Args:
+        H (int): The desired height of the output tensor.
+        W (int): The desired width of the output tensor.
+        crop_style (str, optional): The style of cropping. Can be 'center', 'top-left',
+                                    or 'bottom-right'. Defaults to 'center'.
+
+    Raises:
+        ValueError: If an invalid crop_style is provided.
+
+    Example:
+        >>> transform = PadAndCrop(224, 224, crop_style='center')
+        >>> output = transform(input_tensor)  # input_tensor shape: (B, C, H, W)
+        >>> print(output.shape)  # Output: (B, C, 224, 224)
+    """
+    def __init__(self, H, W, crop_style='center'):
+        self.H = H
+        self.W = W
+        self.crop_style = crop_style
+
+    def calc_crop_params(self, img):
+        _, _, H_img, W_img = img.shape
+        dH = max(H_img - self.H, 0)
+        dW = max(W_img - self.W, 0)
+
+        if self.crop_style == 'center':
+            top = dH // 2
+            left = dW // 2
+        elif self.crop_style == 'top-left':
+            top = 0
+            left = 0
+        else:
+            raise ValueError("Invalid crop_style. Use 'center', 'top-left', or 'bottom-right'.")
+
+        return top, left
+
+    def __call__(self, img, **kwargs):
+        top, left = self.calc_crop_params(img)
+        return crop(img, top, left, self.H, self.W)
 
 
 class DownscaleLocalMean:
