@@ -461,6 +461,10 @@ class MergeBatchPatchDims:
         B, N, C, H, W = x.size()
         return x.view(B*N, C, H, W)
 
+class MergeBatchChannelDims:
+    def __call__(self, x, **kwargs):
+        B, C, H, W = x.size()
+        return x.view(B*C, 1, H, W)
 
 class BatchSampler:
     def __init__(self, sampling_fraction = None, dim = 0):
