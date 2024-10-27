@@ -282,14 +282,14 @@ class FullStateDictCheckpoint:
     LR_STATE_DICT_FILE    = 'lr_state_dict.pt'
     ITER_STATE_DICT_FILE  = 'iter_state_dict.pt'
 
-    def __init__(self):
+    def __init__(self, offload_to_cpu=True, rank0_only=True, **kwargs):
         self.state_dict_config = FullStateDictConfig(
-            offload_to_cpu = True,
-            rank0_only     = True,
+            offload_to_cpu = offload_to_cpu,
+            rank0_only     = rank0_only,
         )
         self.optim_dict_config = FullOptimStateDictConfig(
-            offload_to_cpu = True,
-            rank0_only     = True,
+            offload_to_cpu = offload_to_cpu,
+            rank0_only     = rank0_only,
         )
 
     def save_model_checkpoint(self, rank, model, path_checkpoint_model):
@@ -496,12 +496,12 @@ class ShardedStateDictCheckpoint:
     LR_STATE_DICT_FILE   = 'lr_state_dict.pt'
     ITER_STATE_DICT_FILE = 'iter_state_dict.pt'
 
-    def __init__(self):
+    def __init__(self, offload_to_cpu=True, **kwargs):
         self.state_dict_config = ShardedStateDictConfig(
-            offload_to_cpu = True,
+            offload_to_cpu = offload_to_cpu,
         )
         self.optim_dict_config = ShardedOptimStateDictConfig(
-            offload_to_cpu = True,
+            offload_to_cpu = offload_to_cpu,
         )
 
     def save_model_checkpoint(self, rank, model, path_checkpoint_model):
