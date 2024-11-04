@@ -56,13 +56,15 @@ class Pad:
         return img_padded
 
 
-class PadAndCrop:
+class Crop:
     """
     A transformation class that crops input tensors to a specified size (H, W).
 
     This class only affects the height (H) and width (W) dimensions of the input tensor,
     leaving the batch (B) and channel (C) dimensions unchanged. It's designed to work
-    with tensors of shape (B, C, H, W) or (C, H, W).
+    with tensors of shape (B, C, H, W) or (C, H, W). Note that if the input image is
+    smaller than the target size, bottom-right style padding is automatically
+    applied before cropping.
 
     Args:
         H (int): The desired height of the output tensor.
@@ -74,7 +76,7 @@ class PadAndCrop:
         ValueError: If an invalid crop_style is provided.
 
     Example:
-        >>> transform = PadAndCrop(224, 224, crop_style='center')
+        >>> transform = Crop(224, 224, crop_style='center')
         >>> output = transform(input_tensor)  # input_tensor shape: (B, C, H, W)
         >>> print(output.shape)  # Output: (B, C, 224, 224)
     """
