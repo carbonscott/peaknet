@@ -12,14 +12,7 @@ colorama.init(autoreset=True)
 # -- Imports for FSDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-# -- Imports for saving sharded state dict
-# Use old APIs
-from torch.distributed._shard.checkpoint import (
-    FileSystemReader,
-    FileSystemWriter,
-    load_state_dict,
-    save_state_dict,
-)
+# -- Imports for saving sharded state dict (removed unused deprecated imports)
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
     DefaultSavePlanner,
