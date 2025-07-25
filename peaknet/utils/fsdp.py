@@ -39,7 +39,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 
 from torch.distributed.fsdp.wrap import (
-    transformer_auto_wrap_policy,
+    ModuleWrapPolicy,
 )
 
 from functools import partial
@@ -290,12 +290,10 @@ def set_sharding_strategy(sharding_stage):
     return sharding_strategy
 
 # --- Wrapping strategy
-# ---- Use built-in transformer wrap policy
+# ---- Use modern ModuleWrapPolicy (replaces deprecated transformer_auto_wrap_policy)
 def shard_layers(layer_cls):
-    auto_wrap_policy = partial(
-        transformer_auto_wrap_policy,
-        transformer_layer_cls=layer_cls, # layer_cls = {layer,}
-    )
+    # ModuleWrapPolicy applies FSDP to every module of the specified module classes
+    auto_wrap_policy = ModuleWrapPolicy(layer_cls)  # layer_cls should be a set of layer classes
     return auto_wrap_policy
 
 # --- Backward prefetch policy

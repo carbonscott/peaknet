@@ -100,26 +100,41 @@ def dist_setup(cpu_only, device_per_node=1, dist_backend='nccl'):
             init_dist_env_with_mpi(device_per_node)
         # else: single GPU case, no need to initialize distributed environment
 
-    # --- Initialize distributed environment
-    uses_dist = int(os.environ.get("WORLD_SIZE", 1)) > 1
-    if uses_dist:
-        rank       = int(os.environ["RANK"      ])
-        local_rank = int(os.environ["LOCAL_RANK"])
-        world_size = int(os.environ["WORLD_SIZE"])
-        dist.init_process_group(backend     = dist_backend,
-                                rank        = rank,
-                                world_size  = world_size,
-                                timeout     = timedelta(seconds = 1800),
-                                init_method = "env://",)
-        print(f"RANK:{rank},LOCAL_RANK:{local_rank},WORLD_SIZE:{world_size}")
-    else:
-        rank       = 0
-        local_rank = 0
-        world_size = 1
-        print(f"NO distributed environment is required.  RANK:{rank},LOCAL_RANK:{local_rank},WORLD_SIZE:{world_size}")
+    # --- Set up GPU device first to determine device_id for init_process_group
+    rank       = int(os.environ.get("RANK", 0))
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    uses_dist  = world_size > 1
 
-    # --- Set up GPU device
     gpu_idx = local_rank % device_per_node    # local_rank is node-centric, whereas torch.cuda.device_count() is resource-centeric (on LSF)
     device = f'cuda:{gpu_idx}' if not cpu_only and torch.cuda.is_available() else 'cpu'
-    if device != 'cpu': torch.cuda.set_device(device)
+
+    # --- Initialize distributed environment with proper device_id
+    if uses_dist:
+        # Set device before init_process_group to avoid warnings
+        if device != 'cpu': 
+            torch.cuda.set_device(device)
+            device_id = torch.device(device)  # Convert to torch.device object
+        else:
+            device_id = None
+
+        # Initialize with device_id to prevent warnings about unknown devices
+        init_kwargs = {
+            "backend": dist_backend,
+            "rank": rank,
+            "world_size": world_size,
+            "timeout": timedelta(seconds=1800),
+            "init_method": "env://",
+        }
+
+        # Add device_id for NCCL backend with CUDA devices
+        if dist_backend == 'nccl' and device_id is not None:
+            init_kwargs["device_id"] = device_id
+
+        dist.init_process_group(**init_kwargs)
+        print(f"RANK:{rank},LOCAL_RANK:{local_rank},WORLD_SIZE:{world_size},DEVICE:{device}")
+    else:
+        if device != 'cpu': 
+            torch.cuda.set_device(device)
+        print(f"NO distributed environment is required.  RANK:{rank},LOCAL_RANK:{local_rank},WORLD_SIZE:{world_size},DEVICE:{device}")
     return rank, local_rank, world_size, uses_dist, device
