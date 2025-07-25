@@ -43,6 +43,7 @@ class SegmentedPeakNetDatasetConfig:
     device         : str
     dtype          : Optional[torch.dtype] = None
     uses_norm      : bool = True
+    scales_variance: bool = True
     perfs_runtime  : bool = False
 
 
@@ -60,6 +61,7 @@ class SegmentedPeakNetDataset(Dataset):
         self.dtype           = config.dtype
         self.transforms      = config.transforms
         self.uses_norm       = config.uses_norm
+        self.scales_variance = config.scales_variance
         self.perfs_runtime   = config.perfs_runtime
         self.buffer_size     = config.buffer_size
         self.device          = config.device
@@ -76,7 +78,7 @@ class SegmentedPeakNetDataset(Dataset):
         self.item_generator  = None
         self.current_dataset = None
 
-        self.norm = InstanceNorm() if self.uses_norm else NoTransform
+        self.norm = InstanceNorm(scales_variance=self.scales_variance) if self.uses_norm else NoTransform
 
         return None
 

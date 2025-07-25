@@ -40,7 +40,7 @@ def pretrained_model(checkpoints: Dict[str, str], default: str = None) -> Callab
                     raise RuntimeError(f"Invalid checkpoint specified ({checkpoint}). Options are: {list(checkpoints.keys())}.")
 
                 state_dict = torch.hub.load_state_dict_from_url(checkpoints[checkpoint], map_location="cpu")
-            
+
                 if "head.projection.weight" in state_dict["model_state"]:
                     # Set the number of classes equal to the state_dict only if the user doesn't want to overwrite it
                     if "num_classes" not in kwdargs:
@@ -57,7 +57,7 @@ def pretrained_model(checkpoints: Dict[str, str], default: str = None) -> Callab
                     strict = False
 
                 model.load_state_dict(state_dict["model_state"], strict=strict)
-            
+
             return model
 
         # Keep some metadata so we can do things that require looping through all available models
@@ -65,7 +65,7 @@ def pretrained_model(checkpoints: Dict[str, str], default: str = None) -> Callab
         model_def.default = default
 
         return model_def
-    
+
     return inner
 
 

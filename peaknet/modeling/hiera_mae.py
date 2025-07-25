@@ -30,10 +30,10 @@ def apply_fusion_head(head: nn.Module, x: torch.Tensor) -> torch.Tensor:
     # Handle both 2D and 3D cases by treating spatial dims generically
     # [B, #MUs, *spatial, C] -> [B*#MUs, C, *spatial] for conv processing
     spatial_pattern = ' '.join([f'dim{i}' for i in range(len(x.shape) - 3)])
-    
+
     x = rearrange(x, f'b units {spatial_pattern} c -> (b units) c {spatial_pattern}')
     x = head(x)
-    
+
     # Restore original layout: [B*#MUs, C', *spatial] -> [B, #MUs, *spatial, C']
     x = rearrange(x, f'(b units) c {spatial_pattern} -> b units {spatial_pattern} c', b=B)
     return x
@@ -152,7 +152,7 @@ class MaskedAutoencoderHiera(Hiera):
     ) -> torch.Tensor:
         # mask (boolean tensor): True must correspond to *masked*
         size = self.pred_stride
-        
+
         # Convert BCHW -> BHWC and extract non-overlapping patches
         label = rearrange(
             input_img, 
@@ -160,7 +160,7 @@ class MaskedAutoencoderHiera(Hiera):
             size1=size, size2=size
         )
         label = label[mask]
-        
+
         if norm:
             mean = label.mean(dim=-1, keepdim=True)
             var = label.var(dim=-1, keepdim=True)
