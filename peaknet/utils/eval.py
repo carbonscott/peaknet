@@ -35,11 +35,11 @@ def estimate_loss(
 ):
     """
     Estimate loss on a dataset with sophisticated distributed support.
-    
+
     The dataloader should be wrapped with Dataloader class or
     DistributedSampler class, best with shuffle being true. The shuffle
     takes place before batching.
-    
+
     Args:
         dataloader: PyTorch DataLoader for evaluation data
         model: Model to evaluate
@@ -52,7 +52,7 @@ def estimate_loss(
         mixed_precision_dtype: Data type for mixed precision
         transforms: Optional transforms to apply during evaluation
         **kwargs: Additional arguments including distributed settings and data dump options
-        
+
     Returns:
         torch.Tensor: Mean loss across all batches and ranks
     """
@@ -86,7 +86,7 @@ def estimate_loss(
     num_samples = torch.zeros(len(dataloader), device=device)
     proc_masks = torch.zeros(len(dataloader), device=device)  # A mask to track the process
     none_mask = torch.zeros(len(dataloader), device=device)  # Mask for None batches
-    
+
     for enum_idx, batch_data in tqdm.tqdm(enumerate(dataloader), total=max_iter, desc=f'[RANK {dist_rank}] Eval{desc}'):    # (B, C, H, W)
         # Sample at most max_iter batches
         if enum_idx >= max_iter:
