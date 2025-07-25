@@ -311,18 +311,21 @@ class InstanceNorm:
     the mean and variance across all channels and spatial dimensions (C, H, W)
     for each sample in the batch.
     """
-    def __init__(self, eps = 1e-6, checks_nan = True):
+    def __init__(self, eps = 1e-6, checks_nan = True, scales_variance=True):
         self.eps = eps
         self.checks_nan = checks_nan
+        self.scales_variance = scales_variance
 
     def __call__(self, img, **kwargs):
         if self.checks_nan and torch.isnan(img).any():
             logger.debug(f"NaN found in the input.")
 
         mean = img.mean(dim=(-1,-2,-3), keepdim=True)
-        var  = img.var (dim=(-1,-2,-3), keepdim=True, correction=0)
+        img_norm = img - mean
 
-        img_norm = (img - mean) / torch.sqrt(var + self.eps)
+        if self.scales_variance:
+            var = img.var (dim=(-1,-2,-3), keepdim=True, correction=0)
+            img_norm = img_norm / torch.sqrt(var + self.eps)
 
         return img_norm
 
