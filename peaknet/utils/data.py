@@ -5,7 +5,7 @@ from itertools import cycle
 def create_infinite_dataloader(dataset, base_seed, drop_last_in_sampler, drop_last_in_loader, 
                               uses_dist, batch_size, num_workers, pin_memory, prefetch_factor):
     """Create an infinite cycling dataloader that repeats the dataset indefinitely.
-    
+
     Args:
         dataset: PyTorch dataset
         base_seed: Base seed for sampling
@@ -16,7 +16,7 @@ def create_infinite_dataloader(dataset, base_seed, drop_last_in_sampler, drop_la
         num_workers: Number of worker processes
         pin_memory: Whether to use pinned memory
         prefetch_factor: Number of samples loaded in advance by each worker
-        
+
     Returns:
         tuple: (infinite_dataloader, sampler, batches_per_epoch) where sampler is None if not using distributed
     """
@@ -35,10 +35,10 @@ def create_infinite_dataloader(dataset, base_seed, drop_last_in_sampler, drop_la
         epoch=0,  # Fixed epoch for cycling
         is_eval=False,
     )
-    
+
     # Calculate batches per epoch for epoch-aware logic
     batches_per_epoch = len(dataloader)
-    
+
     # Create infinite cycling iterator
     return cycle(dataloader), sampler, batches_per_epoch
 
