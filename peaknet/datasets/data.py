@@ -174,12 +174,18 @@ class PeakNetDataset(Dataset):
             if self.dtype is not None:
                 data_combined = data_combined.to(self.dtype)
 
+            # Add batch dimension for transforms that expect 4D tensors (B, C, H, W)
+            data_combined = rearrange(data_combined, 'c h w -> 1 c h w')  # (2, H, W) → (1, 2, H, W)
+
             for enum_idx, transform in enumerate(self.transforms):
                 if self.perfs_runtime:
                     with Timer(tag=f"Transform method {enum_idx:d}", is_on=True):
                         data_combined = transform(data_combined)
                 else:
                     data_combined = transform(data_combined)
+
+            # Remove batch dimension after transforms
+            data_combined = rearrange(data_combined, '1 c h w -> c h w')  # (1, 2, H, W) → (2, H, W)
 
             # Extract back to separate tensors and maintain channel dimension
             # Split the combined (2, H, W) back into two (1, H, W) tensors
