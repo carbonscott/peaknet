@@ -222,3 +222,197 @@ def estimate_loss(
     model.train()
 
     return world_losses_mean
+
+
+@torch.no_grad()
+def estimate_loss_accelerate(
+    dataloader,
+    model,
+    criterion,
+    accelerator,
+    max_iter=None,
+    desc='',
+    transforms=None,
+    data_dump_on=False,
+    **kwargs
+):
+    """
+    Estimate loss on a dataset with native Accelerate integration.
+    
+    Uses reliable torch.distributed.all_reduce for distributed averaging
+    while providing a clean Accelerate-native interface.
+    
+    Args:
+        dataloader: PyTorch DataLoader for evaluation data
+        model: Model to evaluate (should be accelerator.prepare'd)
+        criterion: Loss function to use
+        accelerator: Accelerate Accelerator object
+        max_iter: Maximum number of iterations to evaluate (None for full dataset)
+        desc: Description for progress bar
+        transforms: Optional transforms to apply during evaluation
+        data_dump_on: Enable data dumping for debugging
+        **kwargs: Additional arguments for data dumping (fl_log_prefix, epoch, seg)
+    
+    Returns:
+        torch.Tensor: Mean loss across all batches and ranks
+    """
+    # Extract data dumping parameters
+    fl_log_prefix = kwargs.get('fl_log_prefix')
+    epoch = kwargs.get('epoch')
+    seg = kwargs.get('seg')
+    
+    if accelerator.is_main_process:
+        logger.debug(f"[RANK {accelerator.process_index}] - EVAL Entering")
+    model.eval()
+    
+    # Data dumping setup
+    if accelerator.is_main_process and data_dump_on:
+        dir_data_dump = "data_dump"
+        os.makedirs(dir_data_dump, exist_ok=True)
+    
+    # Set default number of iterations
+    if max_iter is None:
+        max_iter = len(dataloader)
+    
+    # Initialize loss tracking tensors
+    losses = torch.zeros(len(dataloader), device=accelerator.device)
+    num_samples = torch.zeros(len(dataloader), device=accelerator.device)
+    proc_masks = torch.zeros(len(dataloader), device=accelerator.device)
+    none_mask = torch.zeros(len(dataloader), device=accelerator.device)
+    
+    # Evaluation loop with progress bar
+    for enum_idx, batch_data in tqdm.tqdm(
+        enumerate(dataloader), 
+        total=max_iter, 
+        desc=f'[RANK {accelerator.process_index}] Eval{desc}'
+    ):
+        # Sample at most max_iter batches
+        if enum_idx >= max_iter:
+            break
+        
+        if accelerator.is_main_process:
+            logger.debug(f"[RANK {accelerator.process_index}] EVAL - Pre fetching mini_batch {enum_idx}")
+        
+        # Skip None batches (shouldn't happen with modern datasets but kept for safety)
+        if batch_data is None:
+            none_mask[enum_idx] = 1
+            continue
+        
+        # Data preprocessing (same as original)
+        batch_data = torch.cat(batch_data, dim=0)  # (2*B, C, H, W)
+        batch_data = batch_data.to(accelerator.device, non_blocking=True)
+        
+        # Apply transforms if provided
+        if transforms is not None:
+            for trans in transforms:
+                batch_data = trans(batch_data)
+        
+        # Split input and target
+        current_batch_size = batch_data.size(0) // 2
+        batch_input = batch_data[:current_batch_size]
+        batch_target = batch_data[current_batch_size:]
+        
+        # Binarize target if transforms were applied
+        if transforms is not None:
+            batch_target = batch_target > 0.5
+        
+        if accelerator.is_main_process:
+            logger.debug(f"[RANK {accelerator.process_index}] EVAL - Post fetching")
+        
+        # Forward pass (Accelerate handles mixed precision automatically)
+        if accelerator.is_main_process:
+            logger.debug(f"[RANK {accelerator.process_index}] EVAL - Forwarding")
+        
+        batch_output = model(batch_input)
+        
+        # Data dumping
+        if accelerator.is_main_process and data_dump_on:
+            data_dump = {
+                "batch_input": batch_input,
+                "batch_target": batch_target,
+                "batch_output": batch_output,
+            }
+            path_data_dump = os.path.join(
+                dir_data_dump, 
+                f'{fl_log_prefix}.epoch{epoch}_seg{seg}_minib{enum_idx}.fwd.pt'
+            )
+            torch.save(data_dump, path_data_dump)
+        
+        if accelerator.is_main_process:
+            logger.debug(f"[RANK {accelerator.process_index}] EVAL - Loss")
+        
+        # Calculate loss
+        loss = criterion(batch_output, batch_target)
+        loss = loss.mean()
+        
+        # More data dumping
+        if accelerator.is_main_process and data_dump_on:
+            data_dump = {
+                "batch_input": batch_input,
+                "batch_target": batch_target,
+                "batch_output": batch_output,
+                "loss": loss,
+            }
+            path_data_dump = os.path.join(
+                dir_data_dump,
+                f'{fl_log_prefix}.epoch{epoch}_seg{seg}_minib{enum_idx}.loop.pt'
+            )
+            torch.save(data_dump, path_data_dump)
+        
+        # Store results
+        losses[enum_idx] = loss
+        num_samples[enum_idx] = len(batch_input)
+        proc_masks[enum_idx] = 1
+    
+    # Handle NaN detection (keep original robust logic)
+    non_nan_mask = ~torch.isnan(losses)
+    masks = torch.logical_and(proc_masks > 0, non_nan_mask)
+    masks = torch.logical_and(masks, none_mask == 0)
+    
+    # Calculate local mean loss
+    local_valid_losses = losses[masks].to(torch.float32)
+    local_losses_mean = local_valid_losses.mean()
+    
+    # Distributed averaging using reliable torch.distributed (not accelerate.gather)
+    world_nan_counter = torch.tensor(0, dtype=torch.int, device=accelerator.device)
+    local_nan_masks = torch.isnan(local_losses_mean)
+    if local_nan_masks.any().item():
+        logger.error(f"[RANK {accelerator.process_index}] EVAL ERROR: NaN encountered!!!")
+        world_nan_counter += 1
+        local_losses_mean = 0.0
+    
+    # Use torch.distributed directly (more reliable than accelerate.gather)
+    if accelerator.num_processes > 1:
+        import torch.distributed as dist
+        if dist.is_initialized():
+            dist.all_reduce(world_nan_counter, op=dist.ReduceOp.SUM)
+    
+    # Scale local loss for final reduction
+    local_losses_mean /= (accelerator.num_processes - world_nan_counter + 1e-6)
+    
+    # Calculate final mean loss across ranks
+    world_losses_mean = torch.zeros_like(local_losses_mean, dtype=torch.float32, device=accelerator.device)
+    world_losses_mean += local_losses_mean.to(torch.float32)
+    
+    if accelerator.num_processes > 1:
+        import torch.distributed as dist
+        if dist.is_initialized():
+            dist.all_reduce(world_losses_mean, op=dist.ReduceOp.SUM)
+    
+    # Final data dumping
+    if accelerator.is_main_process and data_dump_on:
+        data_dump = {
+            "losses": losses,
+            "proc_masks": proc_masks,
+            "non_nan_mask": non_nan_mask,
+            "masks": masks,
+            "local_valid_losses": local_valid_losses,
+            "local_losses_mean": local_losses_mean,
+            "world_losses_mean": world_losses_mean,
+        }
+        path_data_dump = os.path.join(dir_data_dump, f'{fl_log_prefix}.epoch{epoch}_seg{seg}.end.pt')
+        torch.save(data_dump, path_data_dump)
+    
+    model.train()
+    
+    return world_losses_mean
