@@ -74,8 +74,8 @@ def estimate_loss(
         os.makedirs(dir_data_dump, exist_ok=True)
 
         fl_log_prefix = kwargs.get('fl_log_prefix')
-        epoch = kwargs.get('epoch')
-        seg = kwargs.get('seg')
+        step = kwargs.get('step')
+        eval_type = kwargs.get('eval_type')
 
     # -- Eval iterations
     # Set default number of iterations
@@ -135,7 +135,7 @@ def estimate_loss(
                     "batch_target": batch_target,
                     "batch_output": batch_output,
                 }
-                path_data_dump = os.path.join(dir_data_dump, f'{fl_log_prefix}.epoch{epoch}_seg{seg}_minib{mini_batch}.fwd.pt')
+                path_data_dump = os.path.join(dir_data_dump, f'{fl_log_prefix}.step{step}_{eval_type}_minib{mini_batch}.fwd.pt')
                 torch.save(data_dump, path_data_dump)
 
             if dist_rank == 0:
@@ -155,7 +155,7 @@ def estimate_loss(
                 "batch_output": batch_output,
                 "loss": loss,
             }
-            path_data_dump = os.path.join(dir_data_dump, f'{fl_log_prefix}.epoch{epoch}_seg{seg}_minib{mini_batch}.loop.pt')
+            path_data_dump = os.path.join(dir_data_dump, f'{fl_log_prefix}.step{step}_{eval_type}_minib{mini_batch}.loop.pt')
             torch.save(data_dump, path_data_dump)
 
         losses[enum_idx] = loss
@@ -207,7 +207,7 @@ def estimate_loss(
             "local_losses_mean": local_losses_mean,
             "world_losses_mean": world_losses_mean,
         }
-        path_data_dump = os.path.join(dir_data_dump, f'{fl_log_prefix}.epoch{epoch}_seg{seg}.end.pt')
+        path_data_dump = os.path.join(dir_data_dump, f'{fl_log_prefix}.step{step}_{eval_type}.end.pt')
         torch.save(data_dump, path_data_dump)
 
     model.train()
@@ -249,8 +249,8 @@ def estimate_loss_accelerate(
     """
     # Extract data dumping parameters
     fl_log_prefix = kwargs.get('fl_log_prefix')
-    epoch = kwargs.get('epoch')
-    seg = kwargs.get('seg')
+    step = kwargs.get('step')
+    eval_type = kwargs.get('eval_type')
 
     if accelerator.is_main_process:
         logger.debug(f"[RANK {accelerator.process_index}] - EVAL Entering")
@@ -325,7 +325,7 @@ def estimate_loss_accelerate(
             }
             path_data_dump = os.path.join(
                 dir_data_dump, 
-                f'{fl_log_prefix}.epoch{epoch}_seg{seg}_minib{enum_idx}.fwd.pt'
+                f'{fl_log_prefix}.step{step}_{eval_type}_minib{enum_idx}.fwd.pt'
             )
             torch.save(data_dump, path_data_dump)
 
@@ -346,7 +346,7 @@ def estimate_loss_accelerate(
             }
             path_data_dump = os.path.join(
                 dir_data_dump,
-                f'{fl_log_prefix}.epoch{epoch}_seg{seg}_minib{enum_idx}.loop.pt'
+                f'{fl_log_prefix}.step{step}_{eval_type}_minib{enum_idx}.loop.pt'
             )
             torch.save(data_dump, path_data_dump)
 
@@ -401,7 +401,7 @@ def estimate_loss_accelerate(
             "local_losses_mean": local_losses_mean,
             "world_losses_mean": world_losses_mean,
         }
-        path_data_dump = os.path.join(dir_data_dump, f'{fl_log_prefix}.epoch{epoch}_seg{seg}.end.pt')
+        path_data_dump = os.path.join(dir_data_dump, f'{fl_log_prefix}.step{step}_{eval_type}.end.pt')
         torch.save(data_dump, path_data_dump)
 
     model.train()
