@@ -122,10 +122,10 @@ class PeakNetDataset(Dataset):
     def _generate_assigned_indices(self) -> List[int]:
         """Generate assigned global indices for this rank using shuffle-then-partition."""
         total_samples = self.global_manager.total_samples
-        
+
         # Generate global index list
         global_indices = list(range(total_samples))
-        
+
         if self.enable_shuffling:
             # Shuffle global indices using deterministic seed
             seed = self.shuffle_seed_base + self.current_shuffle_epoch
@@ -134,27 +134,27 @@ class PeakNetDataset(Dataset):
             rng.shuffle(global_indices)
             logger.info(f"Rank {self.dist_rank}: Shuffled global indices with seed {seed} "
                        f"for shuffle epoch {self.current_shuffle_epoch}")
-        
+
         # Partition shuffled indices among ranks
         samples_per_rank = total_samples // self.dist_world_size
         remainder = total_samples % self.dist_world_size
-        
+
         # Calculate start and end for this rank's partition
         start_idx = self.dist_rank * samples_per_rank + min(self.dist_rank, remainder)
         end_idx = start_idx + samples_per_rank + (1 if self.dist_rank < remainder else 0)
-        
+
         # Extract assigned indices for this rank
         assigned_indices = global_indices[start_idx:end_idx]
-        
+
         logger.info(f"Rank {self.dist_rank}: Assigned {len(assigned_indices)} global indices "
                    f"from shuffled list (shuffle epoch {self.current_shuffle_epoch})")
-        
+
         return assigned_indices
 
     def maybe_reshuffle(self, current_step: int):
         """
         Reshuffle assigned indices if it's time based on reshuffle_frequency.
-        
+
         Args:
             current_step: Current training step
         """
@@ -306,13 +306,13 @@ class PeakNetDataset(Dataset):
             checkpoint_state: Dict containing checkpoint state
         """
         self.local_samples_processed = checkpoint_state.get('local_samples_processed', 0)
-        
+
         # Restore shuffle state and assigned indices if present
         if 'enable_shuffling' in checkpoint_state:
             self.enable_shuffling = checkpoint_state['enable_shuffling']
             self.shuffle_seed_base = checkpoint_state.get('shuffle_seed_base', self.shuffle_seed_base)
             self.current_shuffle_epoch = checkpoint_state.get('current_shuffle_epoch', 0)
-            
+
             if 'assigned_indices' in checkpoint_state:
                 self.assigned_global_indices = checkpoint_state['assigned_indices']
                 logger.info(f"Restored checkpoint with {len(self.assigned_global_indices)} assigned indices: "
@@ -320,7 +320,7 @@ class PeakNetDataset(Dataset):
             else:
                 # Regenerate assigned indices if not saved
                 self.assigned_global_indices = self._generate_assigned_indices()
-        
+
         logger.info(f"Restored checkpoint state: rank {self.dist_rank}, "
                    f"local progress {self.local_samples_processed}")
 
@@ -358,12 +358,12 @@ class PeakNetDataset(Dataset):
         # Create new dataset instance with same shuffle state
         new_dataset = PeakNetDataset(new_config)
         new_dataset.current_shuffle_epoch = self.current_shuffle_epoch
-        
+
         # Generate remaining work assignment for new world size
         # Use the same shuffle state to ensure deterministic assignment
         total_samples = new_dataset.global_manager.total_samples
         remaining_samples = total_samples - global_progress
-        
+
         if remaining_samples <= 0:
             # No work remaining
             new_dataset.assigned_global_indices = []
@@ -371,24 +371,24 @@ class PeakNetDataset(Dataset):
         else:
             # Generate global indices for remaining work
             global_indices = list(range(total_samples))
-            
+
             if new_dataset.enable_shuffling:
                 # Use same shuffle state for consistency
                 seed = new_dataset.shuffle_seed_base + new_dataset.current_shuffle_epoch
                 import random
                 rng = random.Random(seed)
                 rng.shuffle(global_indices)
-            
+
             # Take remaining indices starting from global_progress
             remaining_indices = global_indices[global_progress:]
-            
+
             # Partition remaining work among new world size
             samples_per_rank = len(remaining_indices) // new_world_size
             remainder = len(remaining_indices) % new_world_size
-            
+
             start_idx = new_rank * samples_per_rank + min(new_rank, remainder)
             end_idx = start_idx + samples_per_rank + (1 if new_rank < remainder else 0)
-            
+
             new_dataset.assigned_global_indices = remaining_indices[start_idx:end_idx]
             new_dataset.local_samples_processed = 0
 
