@@ -32,6 +32,9 @@ class PeakNetDatasetConfig:
         scales_variance (bool): Whether to scale variance in normalization
         perfs_runtime (bool): Whether to measure performance timing
         global_index_cache (str, optional): Path to global index cache file
+        enable_shuffling (bool): Whether to enable cross-rank shuffling
+        shuffle_seed_base (int): Base seed for deterministic shuffling
+        reshuffle_frequency (int): Steps between reshuffles (0 = no reshuffling)
     """
     path_csv: str
     transforms: List
@@ -44,6 +47,9 @@ class PeakNetDatasetConfig:
     scales_variance: bool = True
     perfs_runtime: bool = False
     global_index_cache: Optional[str] = None
+    enable_shuffling: bool = False
+    shuffle_seed_base: int = 42
+    reshuffle_frequency: int = 0
 
 
 class PeakNetDataset(Dataset):
@@ -83,20 +89,23 @@ class PeakNetDataset(Dataset):
             cache_path=config.global_index_cache
         )
 
-        # Calculate this rank's sample range
-        self.rank_start_idx, self.rank_end_idx = self.global_manager.get_rank_sample_range(
-            self.dist_world_size, self.dist_rank
-        )
+        # Shuffle configuration
+        self.enable_shuffling = config.enable_shuffling
+        self.shuffle_seed_base = config.shuffle_seed_base
+        self.reshuffle_frequency = config.reshuffle_frequency
+        self.current_shuffle_epoch = 0
 
-        # Checkpoint state - tracks progress within this rank's range
+        # Generate assigned global indices for this rank
+        self.assigned_global_indices = self._generate_assigned_indices()
+
+        # Checkpoint state - tracks progress within assigned indices
         self.local_samples_processed = 0  # How many samples this rank has processed
 
         # Zarr file caching (LRU cache like original implementation)
         self.zarr_cache = OrderedDict()
 
-        logger.info(f"Rank {self.dist_rank}: Assigned global samples "
-                   f"[{self.rank_start_idx}, {self.rank_end_idx}) "
-                   f"({self.rank_end_idx - self.rank_start_idx} samples)")
+        logger.info(f"Rank {self.dist_rank}: Assigned {len(self.assigned_global_indices)} global indices "
+                   f"(shuffling {'enabled' if self.enable_shuffling else 'disabled'})")
 
     def _load_file_paths(self, path_csv: str) -> List[str]:
         """Load file paths from CSV file"""
@@ -109,6 +118,54 @@ class PeakNetDataset(Dataset):
             logger.error(f"Failed to load file paths from {path_csv}: {e}")
             raise
         return file_paths
+
+    def _generate_assigned_indices(self) -> List[int]:
+        """Generate assigned global indices for this rank using shuffle-then-partition."""
+        total_samples = self.global_manager.total_samples
+        
+        # Generate global index list
+        global_indices = list(range(total_samples))
+        
+        if self.enable_shuffling:
+            # Shuffle global indices using deterministic seed
+            seed = self.shuffle_seed_base + self.current_shuffle_epoch
+            import random
+            rng = random.Random(seed)
+            rng.shuffle(global_indices)
+            logger.info(f"Rank {self.dist_rank}: Shuffled global indices with seed {seed} "
+                       f"for shuffle epoch {self.current_shuffle_epoch}")
+        
+        # Partition shuffled indices among ranks
+        samples_per_rank = total_samples // self.dist_world_size
+        remainder = total_samples % self.dist_world_size
+        
+        # Calculate start and end for this rank's partition
+        start_idx = self.dist_rank * samples_per_rank + min(self.dist_rank, remainder)
+        end_idx = start_idx + samples_per_rank + (1 if self.dist_rank < remainder else 0)
+        
+        # Extract assigned indices for this rank
+        assigned_indices = global_indices[start_idx:end_idx]
+        
+        logger.info(f"Rank {self.dist_rank}: Assigned {len(assigned_indices)} global indices "
+                   f"from shuffled list (shuffle epoch {self.current_shuffle_epoch})")
+        
+        return assigned_indices
+
+    def maybe_reshuffle(self, current_step: int):
+        """
+        Reshuffle assigned indices if it's time based on reshuffle_frequency.
+        
+        Args:
+            current_step: Current training step
+        """
+        if (self.enable_shuffling and 
+            self.reshuffle_frequency > 0 and 
+            current_step > 0 and
+            current_step % self.reshuffle_frequency == 0):
+            self.current_shuffle_epoch += 1
+            self.assigned_global_indices = self._generate_assigned_indices()
+            logger.info(f"Rank {self.dist_rank}: Reshuffled at step {current_step}, "
+                       f"new shuffle epoch {self.current_shuffle_epoch}")
 
     def _get_cached_zarr(self, file_path: str):
         """Get zarr data with LRU caching"""
@@ -132,8 +189,8 @@ class PeakNetDataset(Dataset):
         return self.zarr_cache[file_path]
 
     def __len__(self) -> int:
-        """Return number of samples assigned to this rank"""
-        return self.rank_end_idx - self.rank_start_idx - self.local_samples_processed
+        """Return number of remaining samples assigned to this rank"""
+        return len(self.assigned_global_indices) - self.local_samples_processed
 
     def __getitem__(self, idx: int):
         """
@@ -148,8 +205,9 @@ class PeakNetDataset(Dataset):
         if idx < 0 or idx >= len(self):
             raise IndexError(f"Index {idx} out of range [0, {len(self)})")
 
-        # Convert local index to global index
-        global_idx = self.rank_start_idx + self.local_samples_processed + idx
+        # Get assigned global index for this local index
+        assigned_idx = self.local_samples_processed + idx
+        global_idx = self.assigned_global_indices[assigned_idx]
 
         # Get file and item index
         file_path, item_idx = self.global_manager.global_to_file_index(global_idx)
@@ -213,9 +271,9 @@ class PeakNetDataset(Dataset):
         """
         self.local_samples_processed += num_samples
 
-        if self.local_samples_processed > (self.rank_end_idx - self.rank_start_idx):
+        if self.local_samples_processed > len(self.assigned_global_indices):
             logger.warning(f"Local progress {self.local_samples_processed} exceeds "
-                          f"assigned range {self.rank_end_idx - self.rank_start_idx}")
+                          f"assigned indices {len(self.assigned_global_indices)}")
 
     def get_checkpoint_state(self) -> Dict[str, Any]:
         """
@@ -224,18 +282,20 @@ class PeakNetDataset(Dataset):
         Returns:
             Dict containing rank's checkpoint state
         """
-        assigned_samples = self.rank_end_idx - self.rank_start_idx
+        assigned_samples = len(self.assigned_global_indices)
         progress_percent = (self.local_samples_processed / assigned_samples * 100) if assigned_samples > 0 else 100.0
 
         return {
             'dist_rank': self.dist_rank,
             'dist_world_size': self.dist_world_size,
-            'rank_start_idx': self.rank_start_idx,
-            'rank_end_idx': self.rank_end_idx,
+            'assigned_indices': self.assigned_global_indices.copy(),
             'local_samples_processed': self.local_samples_processed,
-            'global_samples_processed': self.rank_start_idx + self.local_samples_processed,
             'total_global_samples': self.global_manager.total_samples,
-            'progress_percent': progress_percent
+            'progress_percent': progress_percent,
+            # Shuffle state
+            'enable_shuffling': self.enable_shuffling,
+            'shuffle_seed_base': self.shuffle_seed_base,
+            'current_shuffle_epoch': self.current_shuffle_epoch
         }
 
     def restore_checkpoint_state(self, checkpoint_state: Dict[str, Any]):
@@ -246,7 +306,21 @@ class PeakNetDataset(Dataset):
             checkpoint_state: Dict containing checkpoint state
         """
         self.local_samples_processed = checkpoint_state.get('local_samples_processed', 0)
-
+        
+        # Restore shuffle state and assigned indices if present
+        if 'enable_shuffling' in checkpoint_state:
+            self.enable_shuffling = checkpoint_state['enable_shuffling']
+            self.shuffle_seed_base = checkpoint_state.get('shuffle_seed_base', self.shuffle_seed_base)
+            self.current_shuffle_epoch = checkpoint_state.get('current_shuffle_epoch', 0)
+            
+            if 'assigned_indices' in checkpoint_state:
+                self.assigned_global_indices = checkpoint_state['assigned_indices']
+                logger.info(f"Restored checkpoint with {len(self.assigned_global_indices)} assigned indices: "
+                           f"rank {self.dist_rank}, shuffle epoch {self.current_shuffle_epoch}")
+            else:
+                # Regenerate assigned indices if not saved
+                self.assigned_global_indices = self._generate_assigned_indices()
+        
         logger.info(f"Restored checkpoint state: rank {self.dist_rank}, "
                    f"local progress {self.local_samples_processed}")
 
@@ -275,30 +349,51 @@ class PeakNetDataset(Dataset):
             uses_norm=self.config.uses_norm,
             scales_variance=self.config.scales_variance,
             perfs_runtime=self.config.perfs_runtime,
-            global_index_cache=self.config.global_index_cache
+            global_index_cache=self.config.global_index_cache,
+            enable_shuffling=self.config.enable_shuffling,
+            shuffle_seed_base=self.config.shuffle_seed_base,
+            reshuffle_frequency=self.config.reshuffle_frequency
         )
 
-        # Create new dataset instance
+        # Create new dataset instance with same shuffle state
         new_dataset = PeakNetDataset(new_config)
-
-        # Calculate new work distribution
-        remaining_ranges = new_dataset.global_manager.calculate_remaining_work(
-            global_progress, new_world_size
-        )
-
-        # Set new rank's range
-        if new_rank < len(remaining_ranges):
-            new_dataset.rank_start_idx, new_dataset.rank_end_idx = remaining_ranges[new_rank]
-            new_dataset.local_samples_processed = 0  # Start fresh in new range
+        new_dataset.current_shuffle_epoch = self.current_shuffle_epoch
+        
+        # Generate remaining work assignment for new world size
+        # Use the same shuffle state to ensure deterministic assignment
+        total_samples = new_dataset.global_manager.total_samples
+        remaining_samples = total_samples - global_progress
+        
+        if remaining_samples <= 0:
+            # No work remaining
+            new_dataset.assigned_global_indices = []
+            new_dataset.local_samples_processed = 0
         else:
-            # No work for this rank
-            new_dataset.rank_start_idx = new_dataset.global_manager.total_samples
-            new_dataset.rank_end_idx = new_dataset.global_manager.total_samples
+            # Generate global indices for remaining work
+            global_indices = list(range(total_samples))
+            
+            if new_dataset.enable_shuffling:
+                # Use same shuffle state for consistency
+                seed = new_dataset.shuffle_seed_base + new_dataset.current_shuffle_epoch
+                import random
+                rng = random.Random(seed)
+                rng.shuffle(global_indices)
+            
+            # Take remaining indices starting from global_progress
+            remaining_indices = global_indices[global_progress:]
+            
+            # Partition remaining work among new world size
+            samples_per_rank = len(remaining_indices) // new_world_size
+            remainder = len(remaining_indices) % new_world_size
+            
+            start_idx = new_rank * samples_per_rank + min(new_rank, remainder)
+            end_idx = start_idx + samples_per_rank + (1 if new_rank < remainder else 0)
+            
+            new_dataset.assigned_global_indices = remaining_indices[start_idx:end_idx]
             new_dataset.local_samples_processed = 0
 
         logger.info(f"Created dataset for new world size {new_world_size}, "
-                   f"rank {new_rank}: global range [{new_dataset.rank_start_idx}, "
-                   f"{new_dataset.rank_end_idx})")
+                   f"rank {new_rank}: assigned {len(new_dataset.assigned_global_indices)} indices")
 
         return new_dataset
 
@@ -307,15 +402,16 @@ class PeakNetDataset(Dataset):
         return {
             'rank': self.dist_rank,
             'world_size': self.dist_world_size,
-            'assigned_samples': self.rank_end_idx - self.rank_start_idx,
+            'assigned_samples': len(self.assigned_global_indices),
             'processed_samples': self.local_samples_processed,
             'remaining_samples': len(self),
             'progress_percent': (self.local_samples_processed / 
-                               (self.rank_end_idx - self.rank_start_idx) * 100) 
-                              if self.rank_end_idx > self.rank_start_idx else 100.0,
-            'global_start': self.rank_start_idx,
-            'global_end': self.rank_end_idx,
-            'global_current': self.rank_start_idx + self.local_samples_processed
+                               len(self.assigned_global_indices) * 100) 
+                              if len(self.assigned_global_indices) > 0 else 100.0,
+            'assigned_indices_range': f"[{min(self.assigned_global_indices)}, {max(self.assigned_global_indices)}]" 
+                                    if self.assigned_global_indices else "[]",
+            'current_global_idx': self.assigned_global_indices[self.local_samples_processed - 1] 
+                                if self.local_samples_processed > 0 and self.local_samples_processed <= len(self.assigned_global_indices) else None
         }
 
     def reset_progress(self):
