@@ -3,7 +3,7 @@ from itertools import cycle
 
 
 def create_infinite_dataloader(dataset, base_seed, drop_last_in_sampler, drop_last_in_loader, 
-                              uses_dist, batch_size, num_workers, pin_memory, prefetch_factor):
+                              uses_distributed_sampler, batch_size, num_workers, pin_memory, prefetch_factor):
     """Create an infinite cycling dataloader that repeats the dataset indefinitely.
 
     Args:
@@ -11,7 +11,7 @@ def create_infinite_dataloader(dataset, base_seed, drop_last_in_sampler, drop_la
         base_seed: Base seed for sampling
         drop_last_in_sampler: Whether to drop last incomplete batch in sampler
         drop_last_in_loader: Whether to drop last incomplete batch in loader
-        uses_dist: Whether distributed training is used
+        uses_distributed_sampler: Whether distributed training is used
         batch_size: Batch size
         num_workers: Number of worker processes
         pin_memory: Whether to use pinned memory
@@ -26,7 +26,7 @@ def create_infinite_dataloader(dataset, base_seed, drop_last_in_sampler, drop_la
         base_seed=base_seed,
         drop_last_in_sampler=drop_last_in_sampler,
         drop_last_in_loader=drop_last_in_loader,
-        uses_dist=uses_dist,
+        uses_distributed_sampler=uses_distributed_sampler,
         batch_size=batch_size,
         num_workers=num_workers,
         custom_collate=None,
@@ -48,7 +48,7 @@ def wrap_with_torch_dataloader(
     base_seed,
     drop_last_in_sampler,
     drop_last_in_loader,
-    uses_dist,
+    uses_distributed_sampler,
     batch_size,
     num_workers,
     custom_collate,
@@ -65,7 +65,7 @@ def wrap_with_torch_dataloader(
         base_seed: Base seed for sampling
         drop_last_in_sampler: Whether to drop last incomplete batch in sampler
         drop_last_in_loader: Whether to drop last incomplete batch in loader
-        uses_dist: Whether distributed training is used
+        uses_distributed_sampler: Whether distributed training is used
         batch_size: Batch size
         num_workers: Number of worker processes
         custom_collate: Custom collate function (can be None)
@@ -82,14 +82,14 @@ def wrap_with_torch_dataloader(
         shuffle=True,
         seed=base_seed,
         drop_last=drop_last_in_sampler
-    ) if uses_dist else None
+    ) if uses_distributed_sampler else None
 
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
         sampler=sampler,
         num_workers=num_workers,
-        shuffle=False if is_eval else (None if uses_dist else True),  # Only shuffle if not using distributed sampler
+        shuffle=False if is_eval else (None if uses_distributed_sampler else True),  # Only shuffle if not using distributed sampler
         collate_fn=custom_collate,
         drop_last=drop_last_in_loader,
         pin_memory=pin_memory,
