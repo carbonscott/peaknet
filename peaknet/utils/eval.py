@@ -79,8 +79,7 @@ def estimate_loss(
 
     # -- Eval iterations
     # Set default number of iterations
-    if max_iter is None:
-        max_iter = len(dataloader)
+    max_iter = min(len(dataloader), max_iter or len(dataloader))
 
     losses = torch.zeros(len(dataloader), device=device)
     num_samples = torch.zeros(len(dataloader), device=device)
