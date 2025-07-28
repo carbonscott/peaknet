@@ -106,29 +106,7 @@ class CheckpointManager:
         try:
             torch.save(checkpoint_data, checkpoint_path)
 
-            # Also save a human-readable summary
-            summary_path = checkpoint_path.replace('.pt', '_summary.json')
-            summary = {
-                'global_samples_processed': global_state['global_samples_processed'],
-                'total_global_samples': global_state['total_global_samples'],
-                'progress_percent': global_state['progress_percent'],
-                'original_world_size': global_state['original_world_size'],
-                'rank_progress': [
-                    {
-                        'rank': state['dist_rank'],
-                        'local_processed': state['local_samples_processed'],
-                        'global_range': [state['rank_start_idx'], state['rank_end_idx']],
-                        'progress_percent': state.get('progress_percent', 0.0)
-                    }
-                    for state in global_state['rank_states']
-                ]
-            }
-
-            with open(summary_path, 'w') as f:
-                json.dump(summary, f, indent=2)
-
             logger.info(f"Saved checkpoint to {checkpoint_path}")
-            logger.info(f"Saved summary to {summary_path}")
 
         except Exception as e:
             logger.error(f"Failed to save checkpoint: {e}")
