@@ -294,16 +294,27 @@ class PeakNetDataset(Dataset):
 
     def advance_progress(self, num_samples: int):
         """
-        Advance progress counter sequentially.
+        Advance progress counter with epoch cycling support.
 
         Args:
             num_samples: Number of samples processed
         """
         self.current_index += num_samples
 
-        if self.current_index > len(self.assigned_global_indices):
-            logger.warning(f"Current index {self.current_index} exceeds "
-                          f"assigned indices {len(self.assigned_global_indices)}")
+        # Handle epoch cycling for infinite dataloaders
+        if len(self.assigned_global_indices) > 0:
+            if self.current_index >= len(self.assigned_global_indices):
+                # Log epoch completion
+                epochs_completed = self.current_index // len(self.assigned_global_indices)
+                self.current_index = self.current_index % len(self.assigned_global_indices)
+                
+                if epochs_completed > 0:
+                    logger.info(f"Rank {self.dist_rank}: Completed {epochs_completed} epoch(s), "
+                               f"reset progress to index {self.current_index}")
+        else:
+            # Handle empty dataset case - just warn once
+            if self.current_index == num_samples:  # First time only
+                logger.warning(f"Rank {self.dist_rank}: Advancing progress on empty dataset")
 
     def get_checkpoint_state(self) -> Dict[str, Any]:
         """
