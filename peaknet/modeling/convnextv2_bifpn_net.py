@@ -231,6 +231,40 @@ class PeakNet(nn.Module):
         return bifpn_output_list
 
 
+    def extract_feature_vectors(self, x, return_multiscale=False):
+        """
+        Extract feature vectors using Global Average Pooling before segmentation head.
+
+        This is a research/analysis method that produces a feature vector representation
+        of the input by applying GAP to BiFPN outputs (headless - before segmentation).
+
+        Args:
+            x: Input tensor [B, C, H, W]
+            return_multiscale: If True, return GAP features from each BiFPN scale separately.
+                              If False, concatenate all scales into one vector.
+
+        Returns:
+            If return_multiscale=False: Tensor of shape [B, num_features * num_scales]
+            If return_multiscale=True: List of tensors, each [B, num_features]
+
+        Example:
+            For PeakNet-673M (512 features, 4 scales):
+            - return_multiscale=False: [B, 2048]
+            - return_multiscale=True: 4 x [B, 512]
+        """
+        bifpn_output_list = self.extract_features(x)
+
+        gap_features = []
+        for bifpn_output in bifpn_output_list:
+            gap_feature = F.adaptive_avg_pool2d(bifpn_output, 1).flatten(1)
+            gap_features.append(gap_feature)
+
+        if return_multiscale:
+            return gap_features
+        else:
+            return torch.cat(gap_features, dim=1)
+
+
     def seg(self, x):
         # Extract features from input...
         bifpn_output_list = self.extract_features(x)
