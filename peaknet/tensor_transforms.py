@@ -493,6 +493,51 @@ class NDArrayToTensor:
         return torch.from_numpy(x)
 
 
+class AddChannelDimension:
+    """
+    Add a channel dimension to input tensors.
+
+    Converts tensors from (B, H, W) to (B, C, H, W) format by adding a channel
+    dimension. This is useful when data sources provide 2D images without an
+    explicit channel dimension but the model expects 3D input.
+
+    Args:
+        channel_dim (int): Position to insert the channel dimension. Default is 1
+                          (after batch dimension), resulting in (B, C, H, W).
+        num_channels (int): Number of channels to add. Default is 1.
+
+    Example:
+        >>> transform = AddChannelDimension()
+        >>> input_tensor = torch.randn(10, 1920, 1920)  # (B, H, W)
+        >>> output = transform(input_tensor)
+        >>> print(output.shape)  # torch.Size([10, 1, 1920, 1920])
+    """
+    def __init__(self, channel_dim: int = 1, num_channels: int = 1):
+        self.channel_dim = channel_dim
+        self.num_channels = num_channels
+
+    def __call__(self, x, **kwargs):
+        """
+        Add channel dimension to input tensor.
+
+        Args:
+            x: Input tensor of shape (B, H, W) or any compatible shape
+
+        Returns:
+            Tensor with added channel dimension
+        """
+        # Add channel dimension using unsqueeze
+        result = x.unsqueeze(self.channel_dim)
+
+        # If num_channels > 1, repeat along the channel dimension
+        if self.num_channels > 1:
+            repeat_dims = [1] * len(result.shape)
+            repeat_dims[self.channel_dim] = self.num_channels
+            result = result.repeat(*repeat_dims)
+
+        return result
+
+
 class NoTransform:
     def __call__(self, x, **kwargs):
         return x
