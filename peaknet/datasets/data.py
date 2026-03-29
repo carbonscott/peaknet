@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 from collections import OrderedDict
 import logging
-import random
 from einops import rearrange
 
 from .indexing import GlobalIndexManager
@@ -19,58 +18,43 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PeakNetDatasetConfig:
     """
-    Configuration for PeakNetDataset.
+    Configuration for PeakNetDataset (pure data accessor).
 
     Attributes:
         path_csv (str): CSV file to configure the dataset list
         transforms (List): A list of transformations to apply to each data item
         buffer_size (int): The number of zarr files buffered in memory (LRU cache)
-        dist_rank (int): Current distributed process rank
-        dist_world_size (int): Total number of distributed processes
         device (str): Device string (e.g., 'cuda:0')
         dtype (torch.dtype, optional): The torch.dtype for representing data
         uses_norm (bool): Whether to apply instance normalization
         scales_variance (bool): Whether to scale variance in normalization
         perfs_runtime (bool): Whether to measure performance timing
         global_index_cache (str, optional): Path to global index cache file
-        enable_shuffling (bool): Whether to enable cross-rank shuffling
-        shuffle_seed_base (int): Base seed for deterministic shuffling
-        reshuffle_frequency (int): Steps between reshuffles (0 = no reshuffling)
     """
     path_csv: str
     transforms: List
     buffer_size: int
-    dist_rank: int
-    dist_world_size: int
     device: str
     dtype: Optional[torch.dtype] = None
     uses_norm: bool = True
     scales_variance: bool = True
     perfs_runtime: bool = False
     global_index_cache: Optional[str] = None
-    enable_shuffling: bool = False
-    shuffle_seed_base: int = 42
-    reshuffle_frequency: int = 0
 
 
 class PeakNetDataset(Dataset):
     """
-    Dataset with elegant redistribution for sample exposure equity.
+    Pure data accessor for PeakNet zarr datasets.
 
-    Uses separate redistribution + concatenation approach:
-    - Redistributes remaining and processed samples separately
-    - Concatenates them for natural sequential processing
-    - Perfect load balancing with any world size changes
-    - Sample exposure equity with GPU failures
-    - Global-only checkpoint state (world-size agnostic)
+    Owns only data loading, caching, transforms, and normalization.
+    Distributed sampling and progress tracking live in
+    ``CheckpointableSampler`` (see ``peaknet.datasets.sampler``).
     """
 
-    def __init__(self, config: PeakNetDatasetConfig, global_samples_processed: int = 0):
+    def __init__(self, config: PeakNetDatasetConfig):
         super().__init__()
 
         self.config = config
-        self.dist_rank = config.dist_rank
-        self.dist_world_size = config.dist_world_size
         self.transforms = config.transforms
         self.buffer_size = config.buffer_size
         self.dtype = config.dtype
@@ -87,44 +71,14 @@ class PeakNetDataset(Dataset):
 
         # Initialize global index manager
         self.global_manager = GlobalIndexManager(
-            self.file_paths, 
+            self.file_paths,
             cache_path=config.global_index_cache
         )
-
-        # Shuffle configuration
-        self.enable_shuffling = config.enable_shuffling
-        self.shuffle_seed_base = config.shuffle_seed_base
-        self.reshuffle_frequency = config.reshuffle_frequency
-        self.current_shuffle_epoch = 0
-
-        # Work redistribution: separate remaining and processed, then concatenate
-        total_samples = self.global_manager.total_samples
-
-        if total_samples == 0:
-            # Handle empty dataset case
-            logger.warning(f"Rank {self.dist_rank}: Dataset is empty (0 samples)")
-            self.assigned_global_indices = []
-            self.current_index = 0
-            return
-
-        effective_processed = global_samples_processed % total_samples  # Handle multi-epoch
-
-        remaining_samples = list(range(effective_processed, total_samples))
-        processed_samples = list(range(0, effective_processed))
-
-        # Redistribute both portions using same shuffle seed for consistency
-        remaining_assigned = self._redistribute_samples(remaining_samples, "remaining")
-        processed_assigned = self._redistribute_samples(processed_samples, "processed")
-
-        # Concatenate: [unprocessed] + [processed] for natural processing order
-        self.assigned_global_indices = remaining_assigned + processed_assigned
-        self.current_index = 0  # Always start sequentially, no offset needed
 
         # Zarr file caching
         self.zarr_cache = OrderedDict()
 
-        logger.info(f"Rank {self.dist_rank}: Assigned {len(self.assigned_global_indices)} global indices "
-                   f"(shuffling {'enabled' if self.enable_shuffling else 'disabled'})")
+        logger.info(f"PeakNetDataset: {self.global_manager.total_samples} total samples")
 
     def _load_file_paths(self, path_csv: str) -> List[str]:
         """Load file paths from CSV file"""
@@ -137,65 +91,6 @@ class PeakNetDataset(Dataset):
             logger.error(f"Failed to load file paths from {path_csv}: {e}")
             raise
         return file_paths
-
-    def _redistribute_samples(self, sample_list: List[int], redistrib_type: str) -> List[int]:
-        """Redistribute samples using shuffle-then-partition with consistent seed.
-
-        Args:
-            sample_list: List of global sample indices to redistribute
-            redistrib_type: Type description for logging ("remaining" or "processed")
-
-        Returns:
-            List of sample indices assigned to this rank
-        """
-        if not sample_list:  # Handle empty lists
-            logger.info(f"Rank {self.dist_rank}: Empty {redistrib_type} sample list, no redistribution needed")
-            return []
-
-        # Create copy to avoid modifying input
-        samples_to_redistribute = sample_list.copy()
-
-        if self.enable_shuffling:
-            # Use same seed for both redistributions to maintain consistency
-            seed = self.shuffle_seed_base + self.current_shuffle_epoch
-            rng = random.Random(seed)
-            rng.shuffle(samples_to_redistribute)
-            logger.info(f"Rank {self.dist_rank}: Shuffled {len(samples_to_redistribute)} {redistrib_type} samples "
-                       f"with seed {seed} for shuffle epoch {self.current_shuffle_epoch}")
-
-        # Even partition among ranks
-        samples_per_rank = len(samples_to_redistribute) // self.dist_world_size
-        remainder = len(samples_to_redistribute) % self.dist_world_size
-
-        start_idx = self.dist_rank * samples_per_rank + min(self.dist_rank, remainder)
-        end_idx = start_idx + samples_per_rank + (1 if self.dist_rank < remainder else 0)
-
-        assigned_samples = samples_to_redistribute[start_idx:end_idx]
-
-        logger.info(f"Rank {self.dist_rank}: Assigned {len(assigned_samples)} {redistrib_type} samples "
-                   f"from redistributed list")
-
-        return assigned_samples
-
-    def maybe_reshuffle(self, current_step: int):
-        """
-        Reshuffle assigned indices if it's time based on reshuffle_frequency.
-
-        Args:
-            current_step: Current training step
-        """
-        if (self.enable_shuffling and 
-            self.reshuffle_frequency > 0 and 
-            current_step > 0 and
-            current_step % self.reshuffle_frequency == 0):
-            self.current_shuffle_epoch += 1
-            # Reshuffle: redistribute all samples with new shuffle epoch
-            total_samples = self.global_manager.total_samples
-            all_samples = list(range(total_samples))
-            self.assigned_global_indices = self._redistribute_samples(all_samples, "reshuffled")
-            self.current_index = 0  # Reset to beginning of new assignment
-            logger.info(f"Rank {self.dist_rank}: Reshuffled at step {current_step}, "
-                       f"new shuffle epoch {self.current_shuffle_epoch}")
 
     def _get_cached_zarr(self, file_path: str):
         """Get zarr data with LRU caching"""
@@ -219,28 +114,23 @@ class PeakNetDataset(Dataset):
         return self.zarr_cache[file_path]
 
     def __len__(self) -> int:
-        """Return number of remaining samples to process."""
-        return len(self.assigned_global_indices) - self.current_index
+        """Return total number of samples in the dataset."""
+        return self.global_manager.total_samples
 
-    def __getitem__(self, idx: int):
+    def __getitem__(self, global_idx: int):
         """
-        Get sample by local index with natural sequential access.
+        Get sample by global index.
 
         Args:
-            idx: Local index within remaining samples (0 to len(self)-1)
+            global_idx: Global sample index (0 to total_samples-1).
+                        The sampler is responsible for choosing which indices
+                        to pass here.
 
         Returns:
             Tuple of (image_tensor, label_tensor)
         """
-        if idx < 0 or idx >= len(self):
-            raise IndexError(f"Index {idx} out of range [0, {len(self)})")
-
-        # Sequential access
-        actual_idx = self.current_index + idx
-        if actual_idx >= len(self.assigned_global_indices):
-            raise IndexError(f"Actual index {actual_idx} out of range [0, {len(self.assigned_global_indices)})")
-
-        global_idx = self.assigned_global_indices[actual_idx]
+        if global_idx < 0 or global_idx >= len(self):
+            raise IndexError(f"Index {global_idx} out of range [0, {len(self)})")
 
         # Get file and item index
         file_path, item_idx = self.global_manager.global_to_file_index(global_idx)
@@ -292,94 +182,12 @@ class PeakNetDataset(Dataset):
 
         return image, label  # (C, H, W)
 
-    def advance_progress(self, num_samples: int):
-        """
-        Advance progress counter with epoch cycling support.
-
-        Args:
-            num_samples: Number of samples processed
-        """
-        self.current_index += num_samples
-
-        # Handle epoch cycling for infinite dataloaders
-        if len(self.assigned_global_indices) > 0:
-            if self.current_index >= len(self.assigned_global_indices):
-                # Log epoch completion
-                epochs_completed = self.current_index // len(self.assigned_global_indices)
-                self.current_index = self.current_index % len(self.assigned_global_indices)
-                
-                if epochs_completed > 0:
-                    logger.info(f"Rank {self.dist_rank}: Completed {epochs_completed} epoch(s), "
-                               f"reset progress to index {self.current_index}")
-        else:
-            # Handle empty dataset case - just warn once
-            if self.current_index == num_samples:  # First time only
-                logger.warning(f"Rank {self.dist_rank}: Advancing progress on empty dataset")
-
-    def get_checkpoint_state(self) -> Dict[str, Any]:
-        """
-        Get checkpoint state (global-only, rank-agnostic).
-
-        Returns:
-            Dict containing global shuffle state only
-        """
-        return {
-            'current_shuffle_epoch': self.current_shuffle_epoch,
-            'shuffle_seed_base': self.shuffle_seed_base,
-            # All rank-specific state removed - will be reconstructed from global progress
-        }
-
-    def restore_checkpoint_state(self, checkpoint_state: Dict[str, Any]):
-        """
-        Restore global shuffle state from checkpoint.
-
-        NOTE: This method is now much simpler since all rank-specific state
-        is reconstructed during __init__ from global_samples_processed.
-
-        Args:
-            checkpoint_state: Dict containing global shuffle state
-        """
-        # Restore only global shuffle state
-        self.current_shuffle_epoch = checkpoint_state.get('current_shuffle_epoch', 0)
-        self.shuffle_seed_base = checkpoint_state.get('shuffle_seed_base', self.shuffle_seed_base)
-
-        logger.info(f"Restored global shuffle state: shuffle epoch {self.current_shuffle_epoch}, "
-                   f"seed base {self.shuffle_seed_base}")
-
-    def get_progress_info(self) -> Dict[str, Any]:
-        """Get detailed progress information for monitoring"""
-        return {
-            'rank': self.dist_rank,
-            'world_size': self.dist_world_size,
-            'assigned_samples': len(self.assigned_global_indices),
-            'processed_samples': self.current_index,
-            'remaining_samples': len(self),
-            'progress_percent': (self.current_index / 
-                               len(self.assigned_global_indices) * 100) 
-                              if len(self.assigned_global_indices) > 0 else 100.0,
-            'assigned_indices_range': f"[{min(self.assigned_global_indices)}, {max(self.assigned_global_indices)}]" 
-                                    if self.assigned_global_indices else "[]",
-            'current_global_idx': self.assigned_global_indices[self.current_index - 1] 
-                                if self.current_index > 0 and self.current_index <= len(self.assigned_global_indices) else None
-        }
-
-    def reset_progress(self):
-        """Reset progress counter (for new epoch/reshuffling)"""
-        self.current_index = 0
-        logger.info(f"Reset progress for rank {self.dist_rank}")
-
     def validate_dataset(self) -> bool:
-        """Validate dataset configuration and global index"""
+        """Validate dataset configuration and global index."""
         try:
-            # Validate global index
             if not self.global_manager.validate_index():
                 return False
 
-            # Check rank assignment
-            if len(self.assigned_global_indices) == 0:
-                logger.warning(f"Rank {self.dist_rank} has no samples assigned")
-
-            # Test accessing a few samples
             if len(self) > 0:
                 test_indices = [0]
                 if len(self) > 1:
@@ -397,7 +205,7 @@ class PeakNetDataset(Dataset):
                         logger.error(f"Failed to access sample {idx}: {e}")
                         return False
 
-            logger.info(f"Dataset validation passed for rank {self.dist_rank}")
+            logger.info("Dataset validation passed")
             return True
 
         except Exception as e:

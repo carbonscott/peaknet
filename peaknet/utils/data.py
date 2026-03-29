@@ -1,99 +1,83 @@
 import torch
-from itertools import cycle
 
 
-def create_infinite_dataloader(dataset, base_seed, drop_last_in_sampler, drop_last_in_loader, 
-                              uses_distributed_sampler, batch_size, num_workers, pin_memory, prefetch_factor):
-    """Create an infinite cycling dataloader that repeats the dataset indefinitely.
-
-    Args:
-        dataset: PyTorch dataset
-        base_seed: Base seed for sampling
-        drop_last_in_sampler: Whether to drop last incomplete batch in sampler
-        drop_last_in_loader: Whether to drop last incomplete batch in loader
-        uses_distributed_sampler: Whether distributed training is used
-        batch_size: Batch size
-        num_workers: Number of worker processes
-        pin_memory: Whether to use pinned memory
-        prefetch_factor: Number of samples loaded in advance by each worker
-
-    Returns:
-        tuple: (infinite_dataloader, sampler, batches_per_epoch) where sampler is None if not using distributed
-    """
-    # Create base dataloader
-    dataloader, sampler = wrap_with_torch_dataloader(
-        dataset=dataset,
-        base_seed=base_seed,
-        drop_last_in_sampler=drop_last_in_sampler,
-        drop_last_in_loader=drop_last_in_loader,
-        uses_distributed_sampler=uses_distributed_sampler,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        custom_collate=None,
-        pin_memory=pin_memory,
-        prefetch_factor=prefetch_factor,
-        epoch=0,  # Fixed epoch for cycling
-        is_eval=False,
-    )
-
-    # Calculate batches per epoch for epoch-aware logic
-    batches_per_epoch = len(dataloader)
-
-    # Create infinite cycling iterator
-    return cycle(dataloader), sampler, batches_per_epoch
+def _infinite_iter(dataloader):
+    """Yield batches from *dataloader* forever, re-invoking its iterator
+    each time it is exhausted so the sampler is re-queried every epoch."""
+    while True:
+        yield from dataloader
 
 
-def wrap_with_torch_dataloader(
-    dataset,
-    base_seed,
-    drop_last_in_sampler,
-    drop_last_in_loader,
-    uses_distributed_sampler,
-    batch_size,
-    num_workers,
-    custom_collate,
-    pin_memory,
-    prefetch_factor,
-    epoch,
-    is_eval=False,
-):
-    """
-    Convenient wrapper for creating PyTorch DataLoaders with distributed support.
+def create_infinite_dataloader(dataset, sampler, drop_last_in_loader,
+                               batch_size, num_workers, custom_collate,
+                               pin_memory, prefetch_factor):
+    """Create an infinite dataloader that re-queries its sampler each epoch.
 
     Args:
-        dataset: PyTorch dataset
-        base_seed: Base seed for sampling
-        drop_last_in_sampler: Whether to drop last incomplete batch in sampler
+        dataset: PyTorch dataset (pure data accessor)
+        sampler: A sampler (e.g. CheckpointableSampler) that yields indices
         drop_last_in_loader: Whether to drop last incomplete batch in loader
-        uses_distributed_sampler: Whether distributed training is used
         batch_size: Batch size
         num_workers: Number of worker processes
         custom_collate: Custom collate function (can be None)
         pin_memory: Whether to use pinned memory
         prefetch_factor: Number of samples loaded in advance by each worker
-        epoch: Current epoch number
-        is_eval: Whether this is for evaluation (affects shuffling)
 
     Returns:
-        tuple: (dataloader, sampler) where sampler is None if not using distributed
+        tuple: (infinite_dataloader, batches_per_epoch)
     """
-    sampler = torch.utils.data.DistributedSampler(
-        dataset,
-        shuffle=True,
-        seed=base_seed,
-        drop_last=drop_last_in_sampler
-    ) if uses_distributed_sampler else None
-
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
         sampler=sampler,
         num_workers=num_workers,
-        shuffle=False if is_eval else (None if uses_distributed_sampler else True),  # Only shuffle if not using distributed sampler
+        shuffle=False,
         collate_fn=custom_collate,
         drop_last=drop_last_in_loader,
         pin_memory=pin_memory,
         prefetch_factor=prefetch_factor,
     )
 
-    return dataloader, sampler
+    batches_per_epoch = len(dataloader)
+    return _infinite_iter(dataloader), batches_per_epoch
+
+
+def wrap_with_torch_dataloader(
+    dataset,
+    sampler,
+    drop_last_in_loader,
+    batch_size,
+    num_workers,
+    custom_collate,
+    pin_memory,
+    prefetch_factor,
+):
+    """
+    Create a PyTorch DataLoader with an external sampler.
+
+    Args:
+        dataset: PyTorch dataset (pure data accessor)
+        sampler: A sampler that yields indices for this rank
+        drop_last_in_loader: Whether to drop last incomplete batch in loader
+        batch_size: Batch size
+        num_workers: Number of worker processes
+        custom_collate: Custom collate function (can be None)
+        pin_memory: Whether to use pinned memory
+        prefetch_factor: Number of samples loaded in advance by each worker
+
+    Returns:
+        DataLoader instance
+    """
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+        num_workers=num_workers,
+        shuffle=False,
+        collate_fn=custom_collate,
+        drop_last=drop_last_in_loader,
+        pin_memory=pin_memory,
+        prefetch_factor=prefetch_factor,
+    )
+
+    return dataloader
